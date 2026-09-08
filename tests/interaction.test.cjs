@@ -7,7 +7,7 @@ async function game({failBlack=false,reduced=false}={}){
   const schedule=(fn,ms=0)=>{jobs.set(++id,{fn,at:time+ms});return id};
   const element=()=>{const events={},styles=new Map(),classes=new Set();return{events,dataset:{},hidden:false,value:0,textContent:'',naturalWidth:64,naturalHeight:64,
     style:{setProperty:(k,v)=>styles.set(k,v)},classList:{add:(...xs)=>xs.forEach(x=>classes.add(x)),remove:(...xs)=>xs.forEach(x=>classes.delete(x)),toggle:(x,b)=>b?classes.add(x):classes.delete(x)},
-    parentElement:{setAttribute(){}},addEventListener:(k,f)=>events[k]=f,setAttribute(){},getBoundingClientRect:()=>({left:0,top:0,width:1280,height:426}),getContext:()=>({drawImage(){},clearRect(){},save(){},restore(){},beginPath(){},moveTo(){},quadraticCurveTo(){},stroke(){},getImageData:()=>({data:new Uint8ClampedArray(64*64*4).fill(255)}),putImageData(){}}),setPointerCapture(){},hasPointerCapture:()=>false};};
+    parentElement:{setAttribute(){}},addEventListener:(k,f)=>events[k]=f,setAttribute(){},getBoundingClientRect:()=>({left:0,top:0,width:1280,height:426}),getContext:()=>({drawImage(){},clearRect(){},save(){},restore(){},beginPath(){},moveTo(){},quadraticCurveTo(){},bezierCurveTo(){},ellipse(){},fill(){},stroke(){},getImageData:()=>({data:new Uint8ClampedArray(64*64*4).fill(255)}),putImageData(){}}),setPointerCapture(){},hasPointerCapture:()=>false};};
   const get=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id)};
   const breeds=[get('yellow'),get('black')];breeds[0].dataset.breed='yellow';breeds[1].dataset.breed='black';
   const document={createElement:element,getElementById:get,querySelectorAll:selector=>selector.includes('data-breed')?breeds:[element(),element(),element()],addEventListener(){}};
