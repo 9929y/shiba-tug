@@ -21,3 +21,5 @@ Response pass:
 - Remove cursor transform tween and native image dragging; cancel on lost capture and blur.
 
 Verification: `node --test tests/interaction.test.cjs` covers short drags, interrupted playback, canceled queued input, and rapid milestone transitions with deterministic timers. These are state-machine regression checks, not GPU frame-time measurements. Browser retest, mobile rendering and resource-failure checks remain for final validation.
+
+Follow-up after the browser connection was restored: `tests/baseline-check.html` loads the historical HTML/CSS/JS from commit 0c1511e. At 390px the measured stage is 366×122px. Two immediate button clicks both leave fill at 0.13441146381189384, with state settling / disabled true; measured lock for this sample is about 228ms. Further inputs reach ch2-idle, confirming the original milestone movement. These are browser-programmatic checks, not physical touch measurements.

@@ -1,0 +1,53 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>柴犬浏览器检查</title>
+<style>body{font:14px system-ui;background:#f7f1e8;color:#493e31;margin:20px}button{padding:12px;margin:6px}pre{white-space:pre-wrap;font:12px/1.5 monospace}iframe{display:block;border:1px solid #ddd;width:390px;height:844px;background:#fbf7ef}main{display:flex;gap:30px}section{flex:1}</style>
+<h1>浏览器行为与手机布局检查</h1><button id="run">运行检查</button><button id="desktop">1280px</button><button id="mobile">390px</button><main><iframe id="game" src="../index.html" title="测试中的柴犬游戏"></iframe><section><pre id="output">准备就绪。测试会重置此预览中的散步进度。</pre></section></main>
+<script>
+const f=document.querySelector('#game'),out=document.querySelector('#output');
+document.querySelector('#desktop').onclick=()=>f.style.width='1280px';document.querySelector('#mobile').onclick=()=>f.style.width='390px';
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function until(fn,limit=5000){const start=performance.now();while(!fn()){if(performance.now()-start>limit)throw Error('等待状态超时');await sleep(25)}}
+document.querySelector('#run').onclick=async()=>{
+ out.textContent='';const log=s=>out.textContent+=s+'\n',check=(ok,label)=>{if(!ok)throw Error(label);log('PASS '+label)};
+ const w=f.contentWindow,d=f.contentDocument,$=id=>d.getElementById(id),stage=$('stage');
+ const send=(type,x,pointerType='mouse')=>stage.dispatchEvent(new w.PointerEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:stage.getBoundingClientRect().top+100,pointerId:7,button:0,isPrimary:true,pointerType}));
+ try{
+  await until(()=>stage.dataset.state==='idle'||stage.dataset.state==='complete');
+  if(stage.dataset.state==='complete')$('restart').click();
+  d.querySelector('button[data-breed="yellow"]').click();await until(()=>stage.dataset.breed==='yellow',15000);
+  const width=stage.getBoundingClientRect().width,start=width*.7;
+  const old=Number(stage.dataset.progress);
+  send('pointerdown',start);send('pointermove',start-10,'touch');await sleep(40);send('pointerup',start-10,'touch');
+  check(Number(stage.dataset.progress)>old,'10px 短拉有进度（合成触摸 PointerEvent）');
+  send('pointerdown',start);send('pointermove',start-width*.11);await sleep(40);
+  check(stage.dataset.state==='dragging','松手收尾可立即被打断');
+  const fixed=stage.dataset.progress;send('pointercancel',start);await sleep(800);
+  check(stage.dataset.progress===fixed&&stage.dataset.state==='idle','取消不提交预览');
+  send('pointerdown',start);send('pointerup',start-width*.23);await sleep(900);
+  check(stage.dataset.progress===fixed,'猛拉触发拒绝、不奖励距离');
+  // Mutation timing measures JS input -> DOM feedback, NOT physical input-to-photon.
+  const samples=[],feedback=[];let drawMs=0,drawCalls=0;const context=$('scene').getContext('2d'),originalDraw=context.drawImage;context.drawImage=function(...args){const t=performance.now();const r=originalDraw.apply(this,args);drawMs+=performance.now()-t;drawCalls++;return r;};send('pointerdown',start);
+  for(let i=0;i<40;i++){
+    const begin=performance.now();send('pointermove',start-width*(.05+(i%10)*.008));feedback.push(performance.now()-begin);if(!(Number(stage.dataset.tension)>0))throw Error('同步张力反馈缺失');
+    await new Promise(r=>w.requestAnimationFrame(r));if(!(Number(stage.dataset.tension)>0))throw Error('张力未在刷新回调更新');samples.push(performance.now()-begin);
+  }
+  send('pointercancel',start);context.drawImage=originalDraw;log('METRIC canvas draw CPU='+drawMs.toFixed(2)+'ms, calls='+drawCalls);samples.sort((a,b)=>a-b);
+  feedback.sort((a,b)=>a-b);log('METRIC input dispatch → DOM feedback ms: median='+feedback[20].toFixed(2)+', p95='+feedback[38].toFixed(2));
+  log('METRIC input dispatch → next rAF ms: median='+samples[20].toFixed(2)+', p95='+samples[38].toFixed(2));
+  const before=stage.dataset.progress;
+  d.querySelector('button[data-breed="black"]').click();await until(()=>stage.dataset.breed==='black',15000);
+  check(stage.dataset.progress===before,'切换黑柴保留进度');
+  $('leashControl').click();await sleep(30);
+  d.querySelector('button[data-breed="yellow"]').click();await until(()=>stage.dataset.breed==='yellow',15000);
+  await sleep(900);check(stage.dataset.state==='idle','动画中切换不被旧播放覆盖');
+  while(stage.dataset.progress!=='1'){$('leashControl').click();await sleep(35)}
+  await until(()=>stage.dataset.state==='complete');await sleep(1800);
+  check(stage.dataset.state==='complete'&&!$('result').hidden,'完成结果持续显示');
+  $('restart').click();await sleep(100);check(stage.dataset.progress==='0'&&stage.dataset.state==='idle','重新开始清除进度');
+  const assets=[...Object.values(w.ShibaFrames),...Object.values(w.ShibaBlackFrames)];
+  await Promise.all(assets.map(src=>new Promise((resolve,reject)=>{const img=new w.Image();img.onload=async()=>{await img.decode();if(img.naturalWidth!==1536||img.naturalHeight!==512)reject(Error('尺寸错误 '+src));else resolve()};img.onerror=()=>reject(Error('资源缺失 '+src));img.src=new URL(src,d.baseURI).href})));
+  check(true,assets.length+' 张动作资源可加载和解码');
+  check(d.documentElement.scrollWidth<=d.documentElement.clientWidth,'手机布局无横向溢出');
+  log('DONE。仍需真实鼠标/键盘与视觉检查；合成触摸不是实体手机测试。');
+ }catch(e){log('FAIL '+e.message)}
+};
+</script></html>

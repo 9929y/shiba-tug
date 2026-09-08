@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const vm=require('node:vm');const fs=require('node:fs');
 const {assessPull,mapX}=require('../mechanics.js');
-async function game(){
+async function game({failBlack=false,reduced=false}={}){
   let time=0,id=0;const jobs=new Map(),nodes=new Map();
   const schedule=(fn,ms=0)=>{jobs.set(++id,{fn,at:time+ms});return id};
   const element=()=>{const events={},styles=new Map(),classes=new Set();return{events,dataset:{},hidden:false,value:0,textContent:'',naturalWidth:1536,naturalHeight:512,
@@ -11,8 +11,8 @@ async function game(){
   const get=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id)};
   const breeds=[get('yellow'),get('black')];breeds[0].dataset.breed='yellow';breeds[1].dataset.breed='black';
   const document={getElementById:get,querySelectorAll:selector=>selector.includes('data-breed')?breeds:[element(),element(),element()],addEventListener(){}};
-  const window={matchMedia:()=>({matches:false}),addEventListener(){}};
-  const context={window,document,setTimeout:schedule,performance:{now:()=>time},requestAnimationFrame:fn=>schedule(()=>fn(time),16),ResizeObserver:class{observe(){}},Image:class{constructor(){this.naturalWidth=1536;this.naturalHeight=512}set src(v){this.value=v;Promise.resolve().then(()=>this.onload())}decode(){return Promise.resolve()}}};
+  const window={matchMedia:()=>({matches:reduced}),addEventListener(){}};
+  const context={window,document,setTimeout:schedule,performance:{now:()=>time},requestAnimationFrame:fn=>schedule(()=>fn(time),16),ResizeObserver:class{observe(){}},Image:class{constructor(){this.naturalWidth=1536;this.naturalHeight=512}set src(v){this.value=v;Promise.resolve().then(()=>failBlack&&v.includes('/black/brace.')?this.onerror():this.onload())}decode(){return Promise.resolve()}}};
   for(const file of ['mechanics.js','frames.js','black-frames.js','game.js'])vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
   const flush=async()=>{for(let n=0;n<100;n++)await Promise.resolve()};
   const tick=async ms=>{const end=time+ms;await flush();while(true){const next=[...jobs].filter(([,v])=>v.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!next)break;jobs.delete(next[0]);time=next[1].at;next[1].fn();await flush()}time=end;await flush()};
@@ -50,4 +50,24 @@ test('switching breed during a step preserves distance and cancels stale playbac
   g.get('black').events.click();await g.tick(1000);
   assert.equal(g.get('stage').dataset.breed,'black');assert.equal(g.get('stage').dataset.progress,distance);assert.equal(g.get('stage').dataset.state,'idle');
   g.get('yellow').events.click();await g.tick(1000);assert.equal(g.get('stage').dataset.breed,'yellow');assert.equal(g.get('stage').dataset.progress,distance);
+});
+
+test('failed target skin leaves the current breed and progress intact',async()=>{
+  const g=await game({failBlack:true});g.get('leashControl').events.click();await g.tick(800);
+  const before=g.get('stage').dataset.progress;g.get('black').events.click();await g.tick(1000);
+  assert.equal(g.get('stage').dataset.breed,'yellow');assert.equal(g.get('stage').dataset.progress,before);assert.match(g.get('breedStatus').textContent,/加载失败/);
+});
+test('switch at the final step cannot hide the completed result',async()=>{
+  const g=await game();for(let i=0;i<9;i++){g.get('leashControl').events.click();await g.tick(20)}
+  g.get('black').events.click();await g.tick(1000);
+  assert.equal(g.get('stage').dataset.state,'complete');assert.equal(g.get('result').hidden,false);
+});
+test('reduced motion finishes and remains replayable',async()=>{
+  const g=await game({reduced:true});g.get('leashControl').events.click();await g.tick(200);
+  assert.equal(g.get('stage').dataset.state,'idle');assert.ok(Number(g.get('stage').dataset.position)>0);
+});
+test('pointer feedback is updated before the next animation frame',async()=>{
+  const g=await game();g.send('pointerdown');g.send('pointermove',550);
+  assert.ok(Number(g.get('stage').dataset.tension)>0);
+  assert.ok(g.get('tensionMeter').value>0);
 });

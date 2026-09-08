@@ -38,7 +38,7 @@
     if(failed){$('breedStatus').textContent='插画加载失败，请再选一次重试。';return;}
     const pose=currentPose;invalidate();cleanDrag();breed=next;
     currentImage=images.get(paths[pose]);currentPose=pose;render();updateBreedUI();
-    setMode(distance>=1?'complete':'idle');$('breedStatus').textContent='';
+    if(distance>=1)complete();else setMode('idle');$('breedStatus').textContent='';
     try {localStorage.setItem('shiba-breed',breed);} catch {}
     // Retain only the selected skin's decoded bitmaps; HTTP cache remains reusable.
     const keep=new Set(Object.values(paths));
@@ -88,9 +88,9 @@
     ctx.drawImage(img,1484/1536*w,0,52/1536*w,h/4,0,0,cw,ch);
     const start=mobile?300:480,span=(mobile?120:420)-x;
     // Smooth derivative at both joins prevents a visible elbow in the curved leash.
-    for(let sx=0;sx<420;sx+=4){
-      const left=mapSpan(sx,420,span),right=mapSpan(sx+4,420,span);
-      draw(480+sx,4,start+left,right-left+.35);
+    for(let sx=0;sx<420;sx+=20){
+      const left=mapSpan(sx,420,span),right=mapSpan(sx+20,420,span);
+      draw(480+sx,20,start+left,right-left+.35);
     }
     if(mobile){draw(180,300,0,300);draw(900,636,420-x,636);}
     else{draw(0,480,0,480);draw(900,636,900-x,636);}
@@ -111,11 +111,7 @@
     raf=0;const dt=lastTime?Math.min(50,now-lastTime):0;lastTime=now;
     if(motion){const t=clamp((now-motion.start)/motion.duration);shownDistance=motion.from+(distance-motion.from)*(1-Math.pow(1-t,3));render();if(t>=1)motion=null;}
     if(drag){
-      const tension=clamp((drag.startX-drag.x)/(bounds.width*.22));
-      drag.tension=tension;drag.peak=Math.max(drag.peak,tension);
-      drag.valid=drag.startX-drag.x>=4||drag.valid;
-      if(tension>=.22&&tension<=.7)drag.gentleMs+=dt;
-      paintDrag(tension);
+      if(drag.tension>=.22&&drag.tension<=.7)drag.gentleMs+=dt;
     }
     if(drag||motion)wake();else lastTime=0;
   }
@@ -140,7 +136,16 @@
     try {stage.setPointerCapture(event.pointerId);} catch {}stage.classList.add('is-dragging');setMode('dragging');
     paintDrag(0);wake();
   }
-  function move(event){if(drag&&event.pointerId===drag.pointerId){drag.x=event.clientX;drag.y=event.clientY}}
+  function move(event){
+    if(!drag||event.pointerId!==drag.pointerId)return;
+    drag.x=event.clientX;drag.y=event.clientY;
+    drag.tension=clamp((drag.startX-drag.x)/(bounds.width*.22));
+    drag.peak=Math.max(drag.peak,drag.tension);
+    drag.valid=drag.valid||drag.startX-drag.x>=4;
+    // Cheap immediate feedback: decoded artwork redraws only on a pose change.
+    // Walking/hold timing remains frame-driven, without making input wait for it.
+    paintDrag(drag.tension);
+  }
   function cleanDrag() {
     const pointer=drag?.pointerId;drag=null;stage.classList.remove('is-dragging');meter.value=0;
     stage.dataset.feeling='loose';stage.dataset.tension='0';$('tensionLabel').textContent='轻拉 · 观察 · 松绳';
@@ -171,8 +176,14 @@
     say(result.kind==='trust'?'一松绳，它就懂了。默契 +1。':result.kind==='small'?'好吧，先挪一点点。':'它悄悄跟上了一小步。');
     const finished=await sequence([['return',65],['lift',55],['slide-1',65],['slide',55],['land',60],['replant',80]],token);
     if(!finished)return;
-    if(distance>=1){setMode('complete');$('result').hidden=false;$('resultTitle').textContent=gentleSteps>2?'你们有点默契了。':'今天，是它带你散步。';$('resultDetail').textContent=`${steps} 次小步，${gentleSteps} 次默契松绳。明天还一起走。`;say('散步完成。可以切换柴犬留作纪念，或再走一圈。');}
+    if(distance>=1)complete();
     else setMode('idle');
+  }
+  function complete() {
+    setMode('complete');$('result').hidden=false;
+    $('resultTitle').textContent=gentleSteps>2?'你们有点默契了。':'今天，是它带你散步。';
+    $('resultDetail').textContent=`${steps} 次小步，${gentleSteps} 次默契松绳。明天还一起走。`;
+    say('散步完成。可以切换柴犬留作纪念，或再走一圈。');
   }
   function restart() {
     invalidate();cleanDrag();distance=0;shownDistance=0;motion=null;steps=0;gentleSteps=0;reactions=0;
