@@ -1,214 +1,101 @@
 (() => {
-  'use strict';
-  const $ = id => document.getElementById(id);
-  const stage=$('stage'), canvas=$('scene'), ctx=canvas.getContext('2d',{alpha:false});
-  const poster=$('celCurrent'), cue=$('grabCue'), control=$('leashControl');
-  const meter=$('tensionMeter'), message=$('message'), progress=$('walkProgress');
-  const {clamp,assessPull,mapX,mapSpan}=window.ShibaRules;
-  const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');
-  const frames=window.ShibaFrames;
-  const cache=new Map(), images=new Map();
-  let mode='loading', currentPose='idle', currentImage=null;
-  let distance=0, shownDistance=0, motion=null, drag=null, frameRequest=0, playback=0, raf=0;
-  let bounds=stage.getBoundingClientRect(), lastTime=0, steps=0, gentleSteps=0, reactions=0;
-  let breed='yellow', breedRequest=0;
-  try { if(localStorage.getItem('shiba-breed')==='black')breed='black'; } catch {}
-  const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  const phase=()=>Math.min(2,Math.floor(distance*3));
-  const chapterNames=['出门的第一步','这块地，值得闻闻','好吧，再陪你走一段'];
-  const initialHint='按住牵引绳向左轻拉，放松一点，再松手。';
-  const pathsFor=()=> breed==='black' ? window.ShibaBlackFrames : frames;
-  function updateBreedUI() {
-    stage.dataset.breed=breed;
-    document.querySelectorAll('button[data-breed]').forEach(button=>{
-      const selected=button.dataset.breed===breed;
-      button.setAttribute('aria-pressed',String(selected));button.classList.toggle('selected',selected);
-    });
-    canvas.setAttribute('aria-label',`一只${breed==='black'?'黑柴':'黄柴'}，正和你商量着散步。`);
-  }
-  async function switchBreed(next) {
-    const request=++breedRequest;
-    if(next===breed){$('breedStatus').textContent='';return;}
-    $('breedStatus').textContent=`正在准备${next==='black'?'黑柴':'黄柴'}…`;
-    const paths=next==='black'?window.ShibaBlackFrames:frames;
-    const names=Object.keys(paths);let cursor=0, failed=false;
-    const load=async()=>{while(cursor<names.length){if(request!==breedRequest)return;const name=names[cursor++];if(!await preload(paths[name]))failed=true;}};
-    await Promise.all([load(),load(),load()]);
-    if(request!==breedRequest)return;
-    if(failed){$('breedStatus').textContent='插画加载失败，请再选一次重试。';return;}
-    const pose=currentPose;invalidate();cleanDrag();breed=next;
-    currentImage=images.get(paths[pose]);currentPose=pose;render();updateBreedUI();
-    if(distance>=1)complete();else setMode('idle');$('breedStatus').textContent='';
-    try {localStorage.setItem('shiba-breed',breed);} catch {}
-    // Retain only the selected skin's decoded bitmaps; HTTP cache remains reusable.
-    const keep=new Set(Object.values(paths));
-    for(const src of images.keys())if(!keep.has(src)){images.delete(src);cache.delete(src);}
-  }
-  function setMode(value) {
-    mode=value; stage.dataset.state=value; stage.dataset.chapter=String(phase()+1);
-    control.disabled=value==='loading'||value==='complete';
-    $('restart').hidden=value!=='complete';
-    $('loading').hidden=value!=='loading';
-  }
-  function say(text) { message.textContent=text; }
-  function updateProgress() {
-    const percent=Math.round(distance*100);
-    progress.value=percent;
-    $('distance').textContent=percent+'%';
-    $('chapter').textContent=distance>=1?'今天的散步，谈成了':chapterNames[phase()];
-    stage.dataset.chapter=String(phase()+1);
-    stage.dataset.progress=String(distance);
-    $('route').style.setProperty('--progress',String(distance));
-    document.querySelectorAll('.route-stop').forEach((node,i)=>node.classList.toggle('visited',distance>=i/2));
-  }
-  function preload(src) {
-    if(cache.has(src))return cache.get(src);
-    const task=new Promise(resolve=>{
-      const img=new Image();img.decoding='async';
-      img.onload=async()=>{try{await img.decode();images.set(src,img);resolve(img)}catch{cache.delete(src);resolve(null)}};
-      img.onerror=()=>{cache.delete(src);resolve(null)};img.src=src;
-    });cache.set(src,task);return task;
-  }
-  async function show(pose) {
-    const request=++frameRequest;
-    const src=pathsFor()[pose];
-    const img=images.get(src)||await preload(src);
-    if(!img||request!==frameRequest)return false;
-    currentImage=img;currentPose=pose;stage.dataset.pose=pose;
-    render();return true;
-  }
-  function render() {
-    if(!currentImage)return;
-    const img=currentImage,w=img.naturalWidth,h=img.naturalHeight;
-    const mobile=bounds.width<=620;
-    const cw=mobile?1024:1536,ch=mobile?640:512,y=mobile?64:0;
-    if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch;}
-    const x=shownDistance*(mobile?80:220);
-    const draw=(sx,sw,dx,dw)=>ctx.drawImage(img,sx/1536*w,0,sw/1536*w,h,dx,y,dw,512);
-    ctx.drawImage(img,1484/1536*w,0,52/1536*w,h/4,0,0,cw,ch);
-    const start=mobile?300:480,span=(mobile?120:420)-x;
-    // Smooth derivative at both joins prevents a visible elbow in the curved leash.
-    for(let sx=0;sx<420;sx+=20){
-      const left=mapSpan(sx,420,span),right=mapSpan(sx+20,420,span);
-      draw(480+sx,20,start+left,right-left+.35);
-    }
-    if(mobile){draw(180,300,0,300);draw(900,636,420-x,636);}
-    else{draw(0,480,0,480);draw(900,636,900-x,636);}
-    poster.hidden=true;canvas.hidden=false;
-    stage.dataset.position=shownDistance.toFixed(4);
-    const end=currentPose==='refusal'?1060:1035;
-    const endX=mobile?end-900+420-x:mapX(end,x);
-    $('ropeHit').parentElement.setAttribute('viewBox',`0 0 ${cw} ${ch}`);
-    $('ropeHit').setAttribute('d',`M ${mobile?135:315} ${240+y} Q ${mobile?360:mapX(700,x)} ${(['idle','hover','soften','replant','settled'].includes(currentPose)?430:295)+y} ${endX} ${300+y}`);
-  }
-  function invalidate() {playback++;frameRequest++;return playback;}
-  async function sequence(items,token) {
-    for(const [pose,ms] of items){if(token!==playback)return false;await show(pose);if(token!==playback)return false;await wait(reduced.matches?20:ms)}
-    return token===playback;
-  }
-  function wake() {if(!raf)raf=requestAnimationFrame(tick)}
-  function tick(now) {
-    raf=0;const dt=lastTime?Math.min(50,now-lastTime):0;lastTime=now;
-    if(motion){const t=clamp((now-motion.start)/motion.duration);shownDistance=motion.from+(distance-motion.from)*(1-Math.pow(1-t,3));render();if(t>=1)motion=null;}
-    if(drag){
-      if(drag.tension>=.22&&drag.tension<=.7)drag.gentleMs+=dt;
-    }
-    if(drag||motion)wake();else lastTime=0;
-  }
-  function tensionPose(t) {
-    const list=['soften','hover','takeup','pull','tight-1','brace','tight-2','crouch-1',reactions%2?'reactionB':'reactionA','turn-1','turn','turn-2','refusal'];
-    return list[Math.min(list.length-1,Math.floor(t*list.length))];
-  }
-  function paintDrag(t) {
-    const pose=tensionPose(t);if(pose!==currentPose)show(pose);
-    const x=clamp(drag.x-bounds.left,0,bounds.width), y=clamp(drag.y-bounds.top,0,bounds.height);
-    cue.style.transform=`translate3d(${x}px,${y}px,0)`;
-    cue.style.setProperty('--tension',String(t));
-    meter.value=t;stage.dataset.tension=t.toFixed(3);
-    const feeling=t>.86?'strong':t>=.22&&t<=.7?'gentle':'loose';
-    stage.dataset.feeling=feeling;
-    $('tensionLabel').textContent=feeling==='strong'?'它开始较劲了':feeling==='gentle'?'这个力度刚刚好':'轻轻收绳';
-  }
-  function start(event) {
-    if(drag||!['idle','settling'].includes(mode)||event.button!==0||event.isPrimary===false||event.target.closest('button'))return;
-    event.preventDefault();invalidate();bounds=stage.getBoundingClientRect();
-    drag={pointerId:event.pointerId,startX:event.clientX,x:event.clientX,y:event.clientY,tension:0,peak:0,gentleMs:0,valid:false};
-    try {stage.setPointerCapture(event.pointerId);} catch {}stage.classList.add('is-dragging');setMode('dragging');
-    paintDrag(0);wake();
-  }
-  function move(event){
-    if(!drag||event.pointerId!==drag.pointerId)return;
-    drag.x=event.clientX;drag.y=event.clientY;
-    drag.tension=clamp((drag.startX-drag.x)/(bounds.width*.22));
-    drag.peak=Math.max(drag.peak,drag.tension);
-    drag.valid=drag.valid||drag.startX-drag.x>=4;
-    // Cheap immediate feedback: decoded artwork redraws only on a pose change.
-    // Walking/hold timing remains frame-driven, without making input wait for it.
-    paintDrag(drag.tension);
-  }
-  function cleanDrag() {
-    const pointer=drag?.pointerId;drag=null;stage.classList.remove('is-dragging');meter.value=0;
-    stage.dataset.feeling='loose';stage.dataset.tension='0';$('tensionLabel').textContent='轻拉 · 观察 · 松绳';
-    if(pointer!==undefined&&stage.hasPointerCapture(pointer))stage.releasePointerCapture(pointer);
-  }
-  function end(event) {
-    if(!drag||event.pointerId!==drag.pointerId)return;
-    drag.tension=clamp((drag.startX-event.clientX)/(bounds.width*.22));
-    drag.peak=Math.max(drag.peak,drag.tension);drag.valid=drag.valid||drag.startX-event.clientX>=4;
-    const pull={...drag};cleanDrag();setMode('idle');commit(pull);
-  }
-  function cancel(event) {
-    if(!drag||(event?.pointerId!==undefined&&event.pointerId!==drag.pointerId))return;
-    invalidate();cleanDrag();setMode('idle');show(distance?'replant':'idle');
-  }
-  async function commit(pull) {
-    if(!['idle','settling'].includes(mode))return;
-    const token=invalidate();const result=assessPull(pull);
-    if(result.kind==='cancel'){show(distance?'replant':'idle');return}
-    setMode('settling');
-    if(result.kind==='refusal') {
-      reactions++;say('它把四只脚都钉住了。试着拉轻一点。');
-      if(await sequence([['turn-1',60],['turn',70],['turn-2',70],['refusal',240],['return',65],['land',55],['replant',45]],token))setMode('idle');
-      return;
-    }
-    distance=clamp(distance+result.gain);steps++;if(result.kind==='trust')gentleSteps++;
-    updateProgress();motion={from:shownDistance,start:performance.now(),duration:reduced.matches?1:620};wake();
-    say(result.kind==='trust'?'一松绳，它就懂了。默契 +1。':result.kind==='small'?'好吧，先挪一点点。':'它悄悄跟上了一小步。');
-    const finished=await sequence([['return',65],['lift',55],['slide-1',65],['slide',55],['land',60],['replant',80]],token);
-    if(!finished)return;
-    if(distance>=1)complete();
-    else setMode('idle');
-  }
-  function complete() {
-    setMode('complete');$('result').hidden=false;
-    $('resultTitle').textContent=gentleSteps>2?'你们有点默契了。':'今天，是它带你散步。';
-    $('resultDetail').textContent=`${steps} 次小步，${gentleSteps} 次默契松绳。明天还一起走。`;
-    say('散步完成。可以切换柴犬留作纪念，或再走一圈。');
-  }
-  function restart() {
-    invalidate();cleanDrag();distance=0;shownDistance=0;motion=null;steps=0;gentleSteps=0;reactions=0;
-    $('result').hidden=true;updateProgress();setMode('idle');show('idle');say(initialHint);
-  }
-  async function boot() {
-    const token=playback;setMode('loading');
-    const first=await preload(pathsFor().idle);
-    if(token!==playback)return;
-    if(!first){$('loading').textContent='插画还没准备好，点击重试';$('loading').onclick=boot;return;}
-    await show('idle');setMode('idle');say(initialHint);
-    // Load common response first, then remaining frames, bounded concurrency.
-    const order=[...new Set(['soften','hover','takeup','pull','tight-1','brace','return','lift','slide','land','replant',...Object.keys(pathsFor())])];
-    let cursor=0;const work=async()=>{while(cursor<order.length)await preload(pathsFor()[order[cursor++]]);};
-    await Promise.all([work(),work(),work()]);
-  }
-  stage.addEventListener('pointerdown',start);stage.addEventListener('pointermove',move);stage.addEventListener('pointerup',end);
-  stage.addEventListener('pointercancel',cancel);stage.addEventListener('lostpointercapture',cancel);
-  window.addEventListener('blur',()=>cancel());
-  document.addEventListener('visibilitychange',()=>{if(document.hidden)cancel()});
-  new ResizeObserver(()=>{bounds=stage.getBoundingClientRect();if(drag)cancel();render()}).observe(stage);
-  window.addEventListener('scroll',()=>{bounds=stage.getBoundingClientRect()},{passive:true});
-  control.addEventListener('click',()=>commit({tension:.42,peak:.55,gentleMs:420,valid:true}));
-  control.addEventListener('keydown',event=>{if(event.repeat&&(event.key===' '||event.key==='Enter'))event.preventDefault()});
-  $('restart').addEventListener('click',restart);
-  document.querySelectorAll('button[data-breed]').forEach(button=>button.addEventListener('click',()=>switchBreed(button.dataset.breed)));
-  updateBreedUI();updateProgress();boot();
+'use strict';
+const $=id=>document.getElementById(id),stage=$('stage'),canvas=$('scene'),ctx=canvas.getContext('2d');
+const {clamp,pullLength,previewPull,samplePull}=window.ShibaRules;
+const reduced=matchMedia('(prefers-reduced-motion: reduce)');
+const raw=new Map(),ready=new Map();
+let breed='yellow',mode='loading',pose='idle',drag=null,distance=0,shown=0,motion=null,token=0,skinToken=0,raf=0,last=0,bounds=stage.getBoundingClientRect(),reaction=0,stepCount=0,endingAt=0;
+let action=null,art={};
+try{breed=localStorage.getItem('shiba-breed')==='black'?'black':'yellow'}catch{}
+const paths=b=>b==='black'?window.ShibaBlackFrames:window.ShibaFrames;
+const say=t=>$('message').textContent=t;
+function setMode(m){mode=m;stage.dataset.state=m;$('loading').hidden=m!=='loading';$('restart').hidden=m!=='complete';}
+// Normalize the baked paper's white point, then multiply the illustration onto
+// one shared page background. Unlike chroma keying, this preserves cream fur.
+function paperNormalized(img){
+ const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(img,0,0);
+ const pixels=g.getImageData(0,0,c.width,c.height),d=pixels.data;let sum=[0,0,0],n=0;
+ for(let y=4;y<30;y+=3)for(let x=c.width-45;x<c.width-5;x+=3){let i=(y*c.width+x)*4;for(let k=0;k<3;k++)sum[k]+=d[i+k];n++;}
+ const white=sum.map(v=>v/n);
+ for(let i=0;i<d.length;i+=4)for(let k=0;k<3;k++)d[i+k]=Math.min(255,d[i+k]*255/white[k]);
+ g.putImageData(pixels,0,0);return c;
+}
+async function load(src,normalize=true){
+ if(raw.has(src))return raw.get(src);
+ const task=new Promise(resolve=>{const img=new Image();img.onload=async()=>{try{await img.decode();const result=normalize?paperNormalized(img):img;ready.set(src,result);resolve(result)}catch{raw.delete(src);resolve(null)}};img.onerror=()=>{raw.delete(src);resolve(null)};img.src=src;});raw.set(src,task);return task;
+}
+function imageFor(p=pose){return ready.get(paths(breed)[p])||ready.get(paths(breed).idle)}
+function uiBreed(){document.querySelectorAll('[data-breed]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.breed===breed)));document.querySelectorAll('[data-breed]').forEach(b=>b.classList.toggle('selected',b.dataset.breed===breed));stage.dataset.breed=breed;}
+function updateProgress(){const predicted=drag?previewPull(drag).gain:0;$('route').style.setProperty('--progress',shown);$('route').style.setProperty('--preview',clamp(distance+predicted));$('walkProgress').value=Math.round(shown*100);stage.dataset.progress=distance.toFixed(4);stage.dataset.preview=predicted.toFixed(4);stage.dataset.position=shown.toFixed(4);}
+function poseFor(t){const names=['idle','soften','hover','takeup','pull','tight-1','brace','tight-2','crouch-1','turn-1','turn','turn-2','refusal'];return names[Math.min(12,Math.floor(t*13))]}
+function render(){
+ const img=imageFor();if(!img)return;
+ const mobile=bounds.width<=620,cw=mobile?1024:1536,ch=mobile?640:512,y=mobile?64:0;
+ if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch}
+ ctx.clearRect(0,0,cw,ch);
+ if(mode==='home'||mode==='complete'){renderHome();return;}
+ const t=drag?.tension||0,walk=shown*(mobile?70:200),handShift=t*(mobile?100:130),dogShift=walk+t*8;
+ const start=(mobile?300:480)-handShift, dogStart=(mobile?420:900)-dogShift;
+ const draw=(sx,sw,dx,dw)=>ctx.drawImage(img,sx/1536*img.width,0,sw/1536*img.width,img.height,dx,y,dw,512);
+ for(let sx=0;sx<420;sx+=20)draw(480+sx,20,start+sx/420*(dogStart-start),(dogStart-start)/21+.4);
+ draw(mobile?180:0,mobile?300:480,-handShift,mobile?300:480);
+ const special=action?.sprite;
+ if(special!==undefined&&art[breed])drawSprite(special,dogStart+125,y+442,400);
+ else draw(900,636,dogStart,636);
+ if(distance>.72&&art.house){ctx.save();ctx.globalAlpha=clamp((shown-.72)/.25)*.35;ctx.drawImage(art.house,20,Math.max(0,y-80),mobile?220:280,mobile?147:187);ctx.restore();}
+ $('ropeHit').parentElement.setAttribute('viewBox',`0 0 ${cw} ${ch}`);
+ $('ropeHit').style.strokeWidth=String(Math.max(90,44*cw/bounds.width));
+ $('ropeHit').setAttribute('d',`M ${(mobile?135:315)-handShift} ${240+y} Q ${(start+dogStart)/2} ${y+430-t*170} ${dogStart+135} ${y+300}`);
+ stage.dataset.pose=pose;stage.dataset.tension=t.toFixed(4);updateProgress();
+}
+function drawSprite(index,x,baseline,width){const img=art[breed];if(!img)return;const sw=img.naturalWidth/4,sh=img.naturalHeight/2,h=width*sh/sw;ctx.drawImage(img,index%4*sw,Math.floor(index/4)*sh,sw,sh,x-width*.5,baseline-h*.9,width,h);}
+function renderHome(){
+ const w=canvas.width,h=canvas.height,p=mode==='complete'?1:clamp((performance.now()-endingAt)/(reduced.matches?500:5200));
+ const houseW=Math.min(w*.72,760),houseH=houseW*2/3,hx=w*.5-houseW*.5,hy=h*.82-houseH;
+ if(art.house)ctx.drawImage(art.house,hx,hy,houseW,houseH);
+ const walk=clamp(p/.7),dogX=w*.83+(w*.49-w*.83)*walk,base=h*.88-h*.19*walk,size=(w<=1024?240:300)*(1-.48*walk);
+ // Four distinct contact poses accompany translation into the doorway.
+ let frame=p<.72?4+Math.floor(p*34)%4:(p<.85?2:3);
+ drawSprite(frame,dogX,base,size);
+ stage.dataset.endingProgress=p.toFixed(3);
+}
+function wake(){if(!raf)raf=requestAnimationFrame(tick)}
+function tick(now){
+ raf=0;let dt=last?Math.min(50,now-last):0;last=now;
+ if(drag){if(drag.keyboard)samplePull(drag,drag.tension+drag.direction*dt/1000*.65,now);else samplePull(drag,drag.tension,now);pose=poseFor(drag.tension);updateProgress();}
+ if(motion){const t=clamp((now-motion.start)/motion.duration);shown=motion.from+(distance-motion.from)*t;if(t===1)motion=null;}
+ if(action){const elapsed=now-action.start;let cursor=0;for(const item of action.frames){cursor+=item.ms;if(elapsed<cursor){pose=item.pose||'replant';action.sprite=item.sprite;break;}}
+ if(elapsed>=cursor){action=null;pose='replant';if(distance>=1&&!motion)home();else if(!drag)setMode('idle');}}
+ if(!action&&!motion&&!drag&&distance>=1&&mode!=='home'&&mode!=='complete')home();
+ if(mode==='home'&&now-endingAt>=(reduced.matches?500:5200)){setMode('complete');say('到家了。柴犬回头向你摇尾巴。');}
+ render();if(drag||motion||action||mode==='home')wake();else last=0;
+}
+function home(){endingAt=performance.now();setMode('home');$('route').hidden=true;stage.setAttribute('aria-label','柴犬正在跟你一起回家');say('它主动跟上你，一起回家。');wake();}
+function newDrag(id,x){token++;action=null;drag={pointerId:id,startX:x,tension:0,peak:0,blocked:false,recoverAt:null,sampleTime:performance.now(),valid:false};setMode('dragging');stage.classList.add('is-dragging');$('guide').hidden=true;try{sessionStorage.setItem('shiba-guided','1')}catch{};render();wake();}
+function start(e){if(!['idle','settling'].includes(mode)||drag||e.button!==0||e.isPrimary===false||e.target.id!=='ropeHit')return;e.preventDefault();bounds=stage.getBoundingClientRect();newDrag(e.pointerId,e.clientX);stage.setPointerCapture(e.pointerId);}
+function move(e){if(!drag||drag.keyboard||e.pointerId!==drag.pointerId)return;samplePull(drag,(drag.startX-e.clientX)/pullLength(bounds.width),performance.now());pose=poseFor(drag.tension);render();}
+function clean(){const id=drag?.pointerId;drag=null;stage.classList.remove('is-dragging');if(id!==undefined&&id!=='keyboard'&&stage.hasPointerCapture(id))stage.releasePointerCapture(id);}
+function end(e){if(!drag||e.pointerId!==drag.pointerId)return;samplePull(drag,(drag.startX-e.clientX)/pullLength(bounds.width),performance.now());finish();}
+function finish(){const result=previewPull(drag);clean();commit(result);}
+function cancel(e){if(!drag||(e?.pointerId!==undefined&&e.pointerId!==drag.pointerId))return;clean();pose='idle';setMode('idle');render();}
+function commit(result){
+ if(!result.gain){if(result.kind==='refusal'){reaction++;action={start:performance.now(),frames:[{pose:'turn',ms:100},{pose:'refusal',sprite:reaction%2,ms:650},{pose:'return',ms:120}],sprite:undefined};setMode('settling');say(breed==='black'?'它得意地笑了。放松一点，再试试。':'它委屈地撑住了。轻一点试试。');wake()}else{setMode('idle');pose='idle';render()}return;}
+ distance=clamp(distance+result.gain);stepCount++;motion={from:shown,start:performance.now(),duration:reduced.matches?60:640};
+ action={start:performance.now(),frames:reduced.matches?[{pose:'replant',ms:60}]:[{pose:'lift',ms:100},{pose:'slide-1',ms:100},{pose:'slide',ms:100},{pose:'land',ms:100},{pose:'replant',ms:100},{pose:'replant',sprite:result.kind==='trust'?3:(stepCount%3===0?2:undefined),ms:180}]};
+ setMode('settling');say(result.kind==='trust'?'放松绳子，它开心地跟上了。':'它跟上了一步。');wake();
+}
+async function switchBreed(next){
+ if(next===breed||mode==='home')return;cancel();const request=++skinToken;$('breedStatus').textContent='…';
+ const all=await Promise.all(Object.values(paths(next)).map(src=>load(src)));
+ if(request!==skinToken)return;if(all.some(x=>!x)){$('breedStatus').textContent='加载失败，请重试';return;}
+ breed=next;action=null;pose='idle';if(mode!=='complete')setMode('idle');uiBreed();$('breedStatus').textContent='';try{localStorage.setItem('shiba-breed',breed)}catch{}render();
+}
+function restart(){token++;clean();distance=shown=0;motion=action=null;pose='idle';stepCount=reaction=0;$('route').hidden=false;setMode('idle');render();}
+async function boot(){setMode('loading');const names=Object.values(paths(breed));let cursor=0,failed=false;const worker=async()=>{while(cursor<names.length)if(!await load(names[cursor++]))failed=true;};await Promise.all([worker(),worker(),worker()]);if(failed){$('loading').textContent='点击重试';return}setMode('idle');uiBreed();render();try{$('guide').hidden=!!sessionStorage.getItem('shiba-guided')}catch{};setTimeout(()=>$('guide').hidden=true,4500);}
+stage.addEventListener('pointerdown',start);stage.addEventListener('pointermove',move);stage.addEventListener('pointerup',end);stage.addEventListener('pointercancel',cancel);stage.addEventListener('lostpointercapture',cancel);
+stage.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key)||!['idle','settling','dragging'].includes(mode))return;e.preventDefault();if(!drag)newDrag('keyboard',0);if(drag.pointerId!=='keyboard')return;drag.keyboard=true;drag.direction=e.key==='ArrowLeft'?1:-1;});
+stage.addEventListener('keyup',e=>{if(drag?.keyboard&&['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();finish();}});
+stage.addEventListener('blur',()=>{if(drag?.keyboard)cancel()});window.addEventListener('blur',()=>cancel());document.addEventListener('visibilitychange',()=>{if(document.hidden)cancel()});new ResizeObserver(()=>{cancel();bounds=stage.getBoundingClientRect();render()}).observe(stage);
+$('restart').addEventListener('click',restart);$('loading').addEventListener('click',boot);document.querySelectorAll('[data-breed]').forEach(b=>b.addEventListener('click',()=>switchBreed(b.dataset.breed)));
+boot();
 })();
