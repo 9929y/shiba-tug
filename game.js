@@ -8,7 +8,7 @@
   const grabCue = document.querySelector('#grabCue');
   const PAUSE = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
   const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const VALID_DRAG = .04;
+  const VALID_DRAG = 4; // CSS pixels: intent threshold, never a visual dead zone.
   const FULL_DRAG = .22;
   const MIN_BAR = .035;
 
@@ -41,20 +41,40 @@
   let dragRaf = 0;
   let reactionCursor = 0;
   const preloadCache = new Map();
+  const decoded = new Set();
+  const retainedImages = new Map();
+  let playback = 0;
+  let requestedFrame = 0;
+  let bounds = stage.getBoundingClientRect();
+  new ResizeObserver(() => { bounds = stage.getBoundingClientRect(); }).observe(stage);
+  window.addEventListener('scroll', () => { bounds = stage.getBoundingClientRect(); }, { passive: true });
+
+  function interruptPlayback() {
+    playback += 1;
+    stage.classList.remove('is-resetting');
+    return playback;
+  }
 
   function setState(next) {
     state = next;
     stage.dataset.state = next;
     stage.dataset.chapter = String(chapter + 1);
-    stage.classList.toggle('is-locked', !['idle', 'dragging'].includes(next));
-    leashControl.disabled = next !== 'idle';
+    stage.classList.toggle('is-locked', next === 'complete');
+    leashControl.disabled = next === 'dragging' || next === 'complete';
   }
 
   function preload(src) {
     if (preloadCache.has(src)) return preloadCache.get(src);
     const task = new Promise((resolve) => {
       const image = new Image();
-      image.onload = () => resolve(true);
+      image.onload = async () => {
+        try {
+          await image.decode();
+          retainedImages.set(src, image);
+          decoded.add(src);
+          resolve(true);
+        } catch { resolve(false); }
+      };
       image.onerror = () => resolve(false);
       image.src = src;
     });
@@ -75,54 +95,45 @@
   }
 
   function showNow(frame) {
-    ropeHit.setAttribute('d', frame.hitPath);
-    if (currentId !== frame.id) {
-      currentCel.src = frame.src;
-      currentId = frame.id;
-    }
-  }
-
-  async function showFrame(frame, hold = 105, fade = false) {
-    if (!(await preload(frame.src))) return false;
-    if (currentId !== frame.id) {
-      if (fade && currentCel.getAttribute('src')) {
-        previousCel.src = currentCel.src;
+    const request = ++requestedFrame;
+    const paint = () => {
+      if (request !== requestedFrame) return;
+      ropeHit.setAttribute('d', frame.hitPath);
+      if (currentId !== frame.id) {
         currentCel.src = frame.src;
         currentId = frame.id;
-        ropeHit.setAttribute('d', frame.hitPath);
-        stage.classList.add('is-resetting');
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-        await PAUSE(REDUCED ? 20 : 250);
-        stage.classList.remove('is-resetting');
-      } else {
-        showNow(frame);
-        await new Promise((resolve) => requestAnimationFrame(resolve));
       }
-    }
-    await PAUSE(REDUCED ? 24 : hold);
-    return true;
+    };
+    if (decoded.has(frame.src)) paint();
+    else preload(frame.src).then((ready) => { if (ready) paint(); });
   }
 
-  async function play(names, hold = 92) {
+  async function showFrame(frame, hold = 105, fade = false, token = playback) {
+    if (!(await preload(frame.src)) || token !== playback) return false;
+    // Direct, decoded swaps avoid both ghosting and a blocking crossfade.
+    showNow(frame);
+    await PAUSE(REDUCED ? 24 : hold);
+    return token === playback;
+  }
+
+  async function play(names, hold = 92, token = playback, scene = chapter) {
     for (const name of names) {
-      if (!(await showFrame(CELS[chapter][name], hold))) return false;
+      if (!(await showFrame(CELS[scene][name], hold, false, token))) return false;
     }
-    return true;
+    return token === playback;
   }
 
   function updateCuePosition(clientX, clientY) {
-    const bounds = stage.getBoundingClientRect();
     grabCue.style.setProperty('--cue-x', `${Math.max(0, Math.min(bounds.width, clientX - bounds.left))}px`);
     grabCue.style.setProperty('--cue-y', `${Math.max(0, Math.min(bounds.height, clientY - bounds.top))}px`);
   }
 
   function tensionFor(clientX, startX) {
-    const width = stage.getBoundingClientRect().width;
+    const width = bounds.width;
     const distance = Math.max(0, startX - clientX);
-    const validDistance = width * VALID_DRAG;
+    const validDistance = VALID_DRAG;
     const fullDistance = width * FULL_DRAG;
-    if (distance < validDistance) return { distance, tension: 0, valid: false };
-    return { distance, tension: Math.min(1, (distance - validDistance) / (fullDistance - validDistance)), valid: true };
+    return { distance, tension: Math.min(1, distance / fullDistance), valid: distance >= validDistance };
   }
 
   function gainFor(tension) {
@@ -209,18 +220,20 @@
     return [tensionPath[Math.min(currentIndex + 1, tensionPath.length - 1)], 'settled'];
   }
 
-  async function resetAfterComplete() {
+  async function resetAfterComplete(token) {
     await PAUSE(REDUCED ? 160 : 1500);
+    if (token !== playback) return;
     fluidProgress.classList.remove('is-complete');
     chapter = 0;
     storedProgress = 0;
     setProgress(storedProgress);
-    await showFrame(CELS[0].idle, 100, true);
-    setState('idle');
+    await showFrame(CELS[0].idle, 100, false, token);
+    if (token === playback) setState('idle');
   }
 
   async function commitPull({ tension = .6, preview = 'brace', variant = 'reactionA', valid = true } = {}) {
-    if (state !== 'idle') return;
+    if (!['idle', 'settling'].includes(state)) return;
+    const token = interruptPlayback();
     if (!valid) {
       showNow(CELS[chapter].idle);
       return;
@@ -232,25 +245,30 @@
     const afterChapter = Math.min(3, Math.floor(storedProgress * 3));
     const crossedMilestone = afterChapter > beforeChapter || storedProgress === 1;
     setProgress(storedProgress);
+    const scene = chapter;
+    if (crossedMilestone) chapter = Math.min(2, afterChapter);
     setState('settling');
-    await play(settleFrames(preview, variant, crossedMilestone), crossedMilestone ? 118 : 82);
+    if (!(await play(settleFrames(preview, variant, crossedMilestone), crossedMilestone ? 118 : 82, token, scene))) return;
 
     if (crossedMilestone) {
       if (afterChapter === 3) {
         fluidProgress.classList.add('is-complete');
         setState('complete');
-        resetAfterComplete();
+        resetAfterComplete(token);
         return;
       }
       chapter = afterChapter;
       preloadChapter(chapter);
-      await showFrame(CELS[chapter].idle, 90, true);
+      if (!(await showFrame(CELS[chapter].idle, 0, false, token))) return;
     }
     setState('idle');
   }
 
   function beginPointer(event) {
-    if (state !== 'idle') return;
+    if (!['idle', 'settling'].includes(state) || event.button !== 0 || event.isPrimary === false) return;
+    event.preventDefault();
+    interruptPlayback();
+    bounds = stage.getBoundingClientRect();
     stage.classList.remove('is-hovering');
     const variant = reactionCursor % 2 === 0 ? 'reactionA' : 'reactionB';
     drag = { startX: event.clientX, pointerId: event.pointerId, tension: 0, valid: false, preview: 'hover', variant };
@@ -269,11 +287,11 @@
 
   function endPointer(event) {
     if (!drag || event.pointerId !== drag.pointerId) return;
-    ropeHit.releasePointerCapture?.(event.pointerId);
     applyDrag(event.clientX, event.clientY);
     const result = { tension: drag.tension, preview: drag.preview, variant: drag.variant, valid: drag.valid };
     if (result.valid) reactionCursor += 1;
     drag = null;
+    if (ropeHit.hasPointerCapture?.(event.pointerId)) ropeHit.releasePointerCapture(event.pointerId);
     stopDragging();
     setState('idle');
     commitPull(result);
@@ -291,13 +309,15 @@
   ropeHit.addEventListener('pointermove', movePointer);
   ropeHit.addEventListener('pointerup', endPointer);
   ropeHit.addEventListener('pointercancel', cancelPointer);
+  ropeHit.addEventListener('lostpointercapture', cancelPointer);
+  window.addEventListener('blur', () => cancelPointer());
   ropeHit.addEventListener('pointerenter', setHover);
   ropeHit.addEventListener('pointerleave', clearHover);
   leashControl.addEventListener('click', (event) => { event.preventDefault(); commitPull(); });
   leashControl.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    commitPull();
+    if (!event.repeat) commitPull();
   });
 
   setProgress(storedProgress);
