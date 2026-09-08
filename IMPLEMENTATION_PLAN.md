@@ -1,29 +1,28 @@
-# Implementation Notes — Shiba Tug 36-cel rebuild
+# Implementation Notes — Shiba Tug 60-cel drag rebuild
 
 The production renderer is a single full-scene cel player. It intentionally contains no visible SVG leash, independent hand SVG, dog sprite, text, buttons or status copy; a transparent SVG path only supplies a narrow pointer target over the leash painted inside each cel.
 
 ## Timeline
 
-- 3 chapters × 12 real full-scene cels = 36 unique production frames.
-- Each chapter has idle, hover, pull, brace, two reaction branches, turn, front refusal, return, slide, replant and settled frames.
-- The third pull selects `reactionA` or `reactionB`; the fourth plays the front refusal through to replant.
-- Action frames are hard-cut at roughly 10–12fps with intentional holds; only chapter changes and end-to-start looping use a short whole-scene fade.
+- 3 chapters × 20 real full-scene cels = 60 unique production frames.
+- Each chapter contains idle, hover, take-up, two extra tension stages, two crouch stages, two alternating reactions, two 3/4 turn stages, front refusal, return, an added slide inbetween, slide, replant and settled frames.
+- Action frames hard-cut at roughly 10–12fps with intentional holds; only chapter changes and end-to-start looping use a short whole-scene fade.
 
 ## State flow
 
-`idle → pull-1 → brace → reaction(A/B) → refusal → slide → next-step → complete`
+`idle → take-up → tension → crouch → reaction(A/B) → turn → refusal → slide → next-step → complete`
 
-Each chapter consumes four pulls. The fourth starts the automatic front refusal, returns to side profile, slides a half step, replants, then shifts the whole illustrated stage for the next chapter.
+Pointer distance is normalized from 4% to 22% of current stage width. A valid release permanently adds 0.035–0.14 stored progress. The current live tension selects the matching cel immediately; crossings at 1/3, 2/3 and 1 play the remaining forward cels through a real slide. No valid release is discarded, and the reaction branch alternates rather than repeating randomly.
 
 ## Production assets
 
-- `assets/cels/source/`: 18 1536×1024 source sheets, each containing two 1536×512 wide cels.
-- `assets/cels/frames/`: 36 production WebP cels compressed at quality 88.
+- `assets/cels/source/`: original and transition-generation source sheets.
+- `assets/cels/frames/`: 60 production WebP cels compressed at quality 88.
 - Generation originals remain in the local generation cache; project-local source sheets preserve the selected derivation inputs.
 
 ## Validation completed
 
-- Browser: four pulls advances each chapter; all three complete after 12 pulls, fill the gradient rail, then loop to the opening cel.
-- Browser: the refusal state reaches the turn cel; transition returns to a side-view slide cel without per-frame dissolves.
-- Input: direct rope pointer target, Enter and Space.
+- Browser: 10 standard-strength releases accumulate smoothly to the complete rail, cross all three scene milestones and loop to the opening cel.
+- Browser: the high-tension path reaches the 3/4 and front refusal cels; forward continuation returns to a side-view slide without replaying the drag-in frames.
+- Input: direct rope pointer target, touch, Enter and Space.
 - Layout: 390px viewport retains the complete connected scene; reduced-motion code limits frame holds and visual effects.
