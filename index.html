@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>小柴的散步谈判</title>
+    <meta name="description" content="一只很难被说服去散步的柴犬。" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="toy-shell">
+      <section class="toy" aria-label="小柴拉绳小游戏">
+        <div class="stage" id="stage" data-state="idle" data-chapter="1">
+          <div class="cel-viewport" id="celViewport">
+            <img class="cel cel-previous" id="celPrevious" alt="" aria-hidden="true" />
+            <img class="cel cel-current" id="celCurrent" alt="一只柴犬固执地站在牵引绳另一端。" />
+            <svg class="hit-layer" viewBox="0 0 1536 512" preserveAspectRatio="none" aria-hidden="true">
+              <path id="ropeHit" class="rope-hit" d="M 305 265 C 560 370, 795 373, 1050 297" />
+            </svg>
+            <div class="grab-cue" id="grabCue" aria-hidden="true">
+              <i class="grab-ripple ripple-one"></i><i class="grab-ripple ripple-two"></i>
+              <svg viewBox="0 0 52 52" focusable="false">
+                <path class="cue-motion" d="M8 19c-3 4-3 10 0 14M14 14c-5 6-5 17 0 24" />
+                <path class="cue-hand" d="M25 43c-7 0-12-5-12-12v-7c0-2 2-3 4-1l4 4V13c0-3 5-3 5 0v12-15c0-3 5-3 5 0v15-12c0-3 5-3 5 0v14-9c0-3 5-3 5 0v14c0 7-5 11-12 11Z" />
+                <path class="cue-line" d="M21 27h20" />
+              </svg>
+            </div>
+          </div>
+          <button class="leash-control" id="leashControl" type="button" aria-describedby="tugHint">
+            <span class="sr-only">轻拉牵引绳</span>
+          </button>
+          <p id="tugHint" class="sr-only">可点击或拖动画中的牵引绳，也可按空格或回车推进。</p>
+        </div>
+        <div class="fluid-progress" id="fluidProgress" aria-hidden="true">
+          <div class="fluid-track"><div class="fluid-fill"></div></div>
+        </div>
+      </section>
+    </main>
+    <script src="game.js"></script>
+  </body>
+</html>
