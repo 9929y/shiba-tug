@@ -30,3 +30,11 @@ Reproduced a real hit-test failure at 7.91%: dragging the visible hand at (270,5
 All production UI strings, accessibility descriptions, status/error messages and document language are now English; versioned entrypoint resources avoid stale mixed-language scripts. Removed the decorative collar ellipse that was being drawn on the chin, and derive the leash anchor from the widest saturated red band instead of averaging all red pixels (including mouth pixels).
 
 Verification: 14 Node tests pass, including black grip input through completion and a production-language check. Actual CUA mouse drags from (270,510) to (125,510), nine consecutive pulls, reached 100% and the completed homecoming screen. Actual restart and overpull work; visual inspection confirms no chin circle. This addresses the gap in prior synthetic tests, which dispatched directly to the rope element and bypassed browser hit testing.
+
+## Follow-up: eliminate the overpull dead end
+
+The live session showed 0% with a refusal expression/status. A valid overpull previously yielded no progress, indefinitely; its explanation was screen-reader-only. This was an overly punitive, poorly communicated rule, rather than another input lock.
+
+Overpull now yields 8% with a brief resistance reaction followed by an actual walking cycle. Comfortable pulls yield 6–14%, small pulls 2–4%; backoff retains its bonus within the 14% cap. A visible percentage and compact English pull/release feedback make the result discoverable. Preview and committed reward continue using the same function. Clicks/invalid gestures still earn nothing.
+
+15 tests pass, including repeated overpull completion for both breeds. Actual black-Shiba mouse play: thirteen consecutive 250px left drags from the hand reached 100%, completed homecoming and exposed Play again. This explicitly exercises the play style excluded by earlier comfortable-pull-only end-to-end validation. The new rule supersedes the zero-gain overpull behavior documented above.

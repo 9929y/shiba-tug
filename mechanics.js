@@ -4,8 +4,9 @@
   function previewPull({tension=0,peak=tension,blocked=false,valid=true}={}){
     const t=clamp(tension);
     if(!valid||t<.08)return {gain:0,kind:'small'};
-    if(blocked||t>=.9)return {gain:0,kind:'refusal'};
-    let gain=t<.25?.02+(t-.08)/.17*.02:t<=.7?.04+(t-.25)/.45*.08:.12*(.9-t)/.2;
+    // Resistance changes the reaction and reward, never creates a zero-progress loop.
+    if(blocked||t>=.9)return {gain:.08,kind:'reluctant'};
+    let gain=t<.25?.02+(t-.08)/.17*.02:t<=.7?.06+(t-.25)/.45*.08:.14-(t-.7)/.2*.06;
     const eased=peak-t>=.1&&t>=.25&&t<=.7;
     if(eased)gain+=.02;
     return {gain:clamp(gain,0,.14),kind:eased?'trust':'step'};

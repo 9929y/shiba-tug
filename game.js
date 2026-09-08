@@ -26,7 +26,7 @@ async function load(src,normalize=true){
 }
 function imageFor(p=pose){return ready.get(paths(breed)[p])||ready.get(paths(breed).idle)}
 function uiBreed(){document.querySelectorAll('[data-breed]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.breed===breed)));document.querySelectorAll('[data-breed]').forEach(b=>b.classList.toggle('selected',b.dataset.breed===breed));stage.dataset.breed=breed;}
-function updateProgress(){const predicted=drag?previewPull(drag).gain:0;$('route').style.setProperty('--progress',shown);$('route').style.setProperty('--preview',clamp(distance+predicted));$('walkProgress').value=Math.round(shown*100);stage.dataset.progress=distance.toFixed(4);stage.dataset.preview=predicted.toFixed(4);stage.dataset.position=shown.toFixed(4);}
+function updateProgress(){const predicted=drag?previewPull(drag).gain:0;$('route').style.setProperty('--progress',shown);$('route').style.setProperty('--preview',clamp(distance+predicted));$('walkProgress').value=Math.round(shown*100);$('routeValue').textContent=Math.round(shown*100)+'%'+(predicted>0?' +'+Math.round(Math.min(predicted,1-distance)*100)+'%':'');$('pullHint').textContent=drag?(drag.blocked?'Ease back for a bigger step':drag.tension<.08?'Pull a little farther':'Release to walk'):(distance===0?'Drag left, then release':'');stage.dataset.progress=distance.toFixed(4);stage.dataset.preview=predicted.toFixed(4);stage.dataset.position=shown.toFixed(4);}
 function poseFor(t){const names=['idle','soften','hover','takeup','pull','tight-1','brace','tight-2','crouch-1','turn-1','turn','turn-2','refusal'];return names[Math.min(12,Math.floor(t*13))]}
 function render(){
  const img=imageFor();if(!img)return;
@@ -95,7 +95,7 @@ function wake(){if(!raf)raf=requestAnimationFrame(tick)}
 function tick(now){
  raf=0;let dt=last?Math.min(50,now-last):0;last=now;
  if(drag){if(drag.keyboard)samplePull(drag,drag.tension+drag.direction*dt/1000*.65,now);else samplePull(drag,drag.tension,now);pose=poseFor(drag.tension);updateProgress();}
- if(motion){const t=clamp((now-motion.start)/motion.duration);shown=motion.from+(distance-motion.from)*t;if(t===1)motion=null;}
+ if(motion){const t=clamp((now-motion.start-(motion.delay||0))/motion.duration);shown=motion.from+(distance-motion.from)*t;if(t===1)motion=null;}
  if(action){const elapsed=now-action.start;let cursor=0;for(const item of action.frames){cursor+=item.ms;if(elapsed<cursor){pose=item.pose||'replant';action.sprite=item.sprite;action.walk=item.walk;break;}}
  if(elapsed>=cursor){restingSprite=action.rest??null;action=null;pose='idle';if(distance>=1&&!motion)home();else if(!drag)setMode('idle');}}
  if(!action&&!motion&&!drag&&distance>=1&&mode!=='home'&&mode!=='complete')home();
@@ -111,10 +111,11 @@ function end(e){if(!drag||e.pointerId!==drag.pointerId)return;samplePull(drag,(d
 function finish(){const result=previewPull(drag);clean();commit(result);}
 function cancel(e){if(!drag||(e?.pointerId!==undefined&&e.pointerId!==drag.pointerId))return;clean();pose='idle';setMode('idle');render();}
 function commit(result){
- if(!result.gain){if(result.kind==='refusal'){reaction++;action={start:performance.now(),rest:reaction%2,frames:[{pose:'turn',ms:100},{pose:'refusal',sprite:reaction%2,ms:650},{pose:'return',ms:120}],sprite:undefined};setMode('settling');say(breed==='black'?'That smug little grin! Ease up and try again.':'Your Shiba digs in. Try a gentler pull.');wake()}else{setMode('idle');pose='idle';render()}return;}
- distance=clamp(distance+result.gain);stepCount++;motion={from:shown,start:performance.now(),duration:reduced.matches?60:640};
- action={start:performance.now(),rest:result.kind==='trust'?3:2+(stepCount%2),frames:reduced.matches?[{pose:'replant',ms:60}]:[{pose:'lift',walk:0,ms:130},{pose:'slide-1',walk:1,ms:130},{pose:'slide',walk:2,ms:130},{pose:'land',walk:3,ms:130},{pose:'replant',sprite:result.kind==='trust'?3:2+(stepCount%2),ms:280}]};
- setMode('settling');say(result.kind==='trust'?'You relaxed the leash. Your Shiba happily follows.':'Your Shiba takes a step.');wake();
+ if(!result.gain){setMode('idle');pose='idle';render();return;}
+ const reluctant=result.kind==='reluctant';if(reluctant)reaction++;
+ distance=clamp(distance+result.gain);stepCount++;motion={from:shown,start:performance.now(),duration:reduced.matches?60:640,delay:reluctant&&!reduced.matches?350:0};
+ action={start:performance.now(),rest:result.kind==='trust'?3:2+(stepCount%2),frames:reduced.matches?[{pose:'replant',ms:60}]:[...(reluctant?[{pose:'refusal',sprite:reaction%2,ms:350}]:[]),{pose:'lift',walk:0,ms:130},{pose:'slide-1',walk:1,ms:130},{pose:'slide',walk:2,ms:130},{pose:'land',walk:3,ms:130},{pose:'replant',sprite:result.kind==='trust'?3:2+(stepCount%2),ms:280}]};
+ setMode('settling');say(reluctant?'A stubborn pause, then a small step. Ease back to go further.':result.kind==='trust'?'You relaxed the leash. Your Shiba happily follows.':'Your Shiba takes a step.');wake();
 }
 async function switchBreed(next){
  if(next===breed||mode==='home'||mode==='loading')return;cancel();const request=++skinToken;$('breedStatus').textContent='…';
@@ -122,7 +123,7 @@ async function switchBreed(next){
  if(request!==skinToken)return;if(all.some(x=>!x)){$('breedStatus').textContent='Could not load your Shiba. Try again.';return;}
  breed=next;action=null;restingSprite=null;pose='idle';if(mode!=='complete')setMode('idle');uiBreed();$('breedStatus').textContent='';try{localStorage.setItem('shiba-breed',breed)}catch{}render();
 }
-function restart(){say('Ready for another walk.');token++;clean();distance=shown=0;motion=action=null;restingSprite=null;pose='idle';stepCount=reaction=0;$('route').hidden=false;stage.setAttribute('aria-label','Leash: hold Left Arrow to pull, Right Arrow to relax, release to take a step');setMode('idle');render();}
+function restart(){stage.dataset.endingProgress='0';say('Ready for another walk.');token++;clean();distance=shown=0;motion=action=null;restingSprite=null;pose='idle';stepCount=reaction=0;$('route').hidden=false;stage.setAttribute('aria-label','Leash: hold Left Arrow to pull, Right Arrow to relax, release to take a step');setMode('idle');render();}
 async function boot(){setMode('loading');const items=await Promise.all(['yellow','black','home','house','walk'].map(async name=>[name,await load('assets/personality/'+name+'.webp',name==='house')]));art=Object.fromEntries(items);for(const [name,img] of items)if(img&&name!=='house')measureSprites(img);if(items.some(([,img])=>!img)){$('loading').textContent='Tap to retry';return;}const names=Object.values(paths(breed));let cursor=0,failed=false;const worker=async()=>{while(cursor<names.length)if(!await load(names[cursor++]))failed=true;};await Promise.all([worker(),worker(),worker()]);if(failed){$('loading').textContent='Tap to retry';return}setMode('idle');uiBreed();render();try{$('guide').hidden=!!sessionStorage.getItem('shiba-guided')}catch{};setTimeout(()=>$('guide').hidden=true,4500);}
 stage.addEventListener('pointerdown',start);stage.addEventListener('pointermove',move);stage.addEventListener('pointerup',end);stage.addEventListener('pointercancel',cancel);stage.addEventListener('lostpointercapture',cancel);
 stage.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key)||!['idle','settling','dragging'].includes(mode))return;e.preventDefault();if(!drag)newDrag('keyboard',0);if(drag.pointerId!=='keyboard')return;drag.keyboard=true;drag.keys??=new Set();drag.keys.add(e.key);drag.direction=e.key==='ArrowLeft'?1:-1;});
