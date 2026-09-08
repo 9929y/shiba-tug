@@ -12,17 +12,22 @@
   const FULL_DRAG = .22;
   const MIN_BAR = .035;
 
-  const NAMES = ['idle', 'hover', 'takeup', 'pull', 'tight-1', 'brace', 'tight-2', 'crouch-1', 'crouch-2', 'reactionA', 'reactionB', 'turn-1', 'turn', 'turn-2', 'refusal', 'return', 'slide-1', 'slide', 'replant', 'settled'];
+  const NAMES = ['idle', 'soften', 'hover', 'takeup', 'pull', 'tight-1', 'brace', 'tight-2', 'crouch-1', 'crouch-2', 'reactionA', 'reactionB', 'turn-1', 'turn', 'turn-2', 'refusal', 'return', 'lift', 'slide-1', 'slide', 'land', 'replant', 'settled'];
   const pathFor = (chapter, name) => {
     const endX = [1060, 1015, 970][chapter];
-    const isLoose = ['idle', 'hover', 'takeup', 'settled', 'replant'].includes(name);
+    const isLoose = ['idle', 'soften', 'hover', 'takeup', 'settled', 'replant'].includes(name);
     const startY = 242;
     const endY = name === 'refusal' ? 338 : 298;
     const sag = isLoose ? 105 : 22;
     return `M 347 ${startY} C 575 ${startY + sag}, ${endX - 235} ${endY + sag}, ${endX} ${endY}`;
   };
   const sourceFor = (chapter, name) => {
+    if (chapter === 0 && ['soften', 'takeup', 'tight-1', 'tight-2', 'crouch-1', 'lift', 'land'].includes(name)) return `assets/cels/inbetweens/ch1-${name}.webp`;
     const filePrefix = `ch${chapter + 1}`;
+    if (name === 'land') name = 'replant';
+    if (name === 'lift') name = 'return';
+    if (name === 'soften') name = 'hover';
+    if (chapter === 0 && name === 'crouch-2') name = 'reactionA';
     const fileName = name.replace('reactionA', 'reaction-a').replace('reactionB', 'reaction-b');
     return `assets/cels/frames/${filePrefix}-${fileName}.webp`;
   };
@@ -118,7 +123,7 @@
 
   async function play(names, hold = 92, token = playback, scene = chapter) {
     for (const name of names) {
-      if (!(await showFrame(CELS[scene][name], hold, false, token))) return false;
+      if (!(await showFrame(CELS[scene][name], ['return', 'lift', 'slide', 'land'].includes(name) ? hold / 2 : hold, false, token))) return false;
     }
     return token === playback;
   }
@@ -141,6 +146,7 @@
   }
 
   function frameForTension(tension, variant) {
+    if (tension < .04) return 'soften';
     if (tension < .08) return 'hover';
     if (tension < .18) return 'takeup';
     if (tension < .28) return 'pull';
@@ -209,10 +215,10 @@
   }
 
   function settleFrames(preview, variant, crossedMilestone) {
-    const tensionPath = ['hover', 'takeup', 'pull', 'tight-1', 'brace', 'tight-2', 'crouch-1', 'crouch-2', variant, 'turn-1', 'turn', 'turn-2', 'refusal'];
+    const tensionPath = ['soften', 'hover', 'takeup', 'pull', 'tight-1', 'brace', 'tight-2', 'crouch-1', 'crouch-2', variant, 'turn-1', 'turn', 'turn-2', 'refusal'];
     const currentIndex = Math.max(0, tensionPath.indexOf(preview));
     if (crossedMilestone) {
-      return [...tensionPath.slice(currentIndex + 1), 'return', 'slide-1', 'slide', 'replant'];
+      return [...tensionPath.slice(currentIndex + 1), 'return', 'lift', 'slide-1', 'slide', 'land', 'replant'];
     }
     if (preview === 'refusal') return ['return', 'settled'];
     if (['turn-1', 'turn', 'turn-2'].includes(preview)) return [...tensionPath.slice(currentIndex + 1), 'return', 'settled'];
