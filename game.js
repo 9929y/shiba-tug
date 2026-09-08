@@ -1,333 +1,165 @@
 (() => {
-  const stage = document.querySelector('#stage');
-  const currentCel = document.querySelector('#celCurrent');
-  const previousCel = document.querySelector('#celPrevious');
-  const ropeHit = document.querySelector('#ropeHit');
-  const leashControl = document.querySelector('#leashControl');
-  const fluidProgress = document.querySelector('#fluidProgress');
-  const grabCue = document.querySelector('#grabCue');
-  const PAUSE = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
-  const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const VALID_DRAG = 4; // CSS pixels: intent threshold, never a visual dead zone.
-  const FULL_DRAG = .22;
-  const MIN_BAR = .035;
-
-  const NAMES = ['idle', 'soften', 'hover', 'takeup', 'pull', 'tight-1', 'brace', 'tight-2', 'crouch-1', 'crouch-2', 'reactionA', 'reactionB', 'turn-1', 'turn', 'turn-2', 'refusal', 'return', 'lift', 'slide-1', 'slide', 'land', 'replant', 'settled'];
-  const pathFor = (chapter, name) => {
-    const endX = [1060, 1015, 970][chapter];
-    const isLoose = ['idle', 'soften', 'hover', 'takeup', 'settled', 'replant'].includes(name);
-    const startY = 242;
-    const endY = name === 'refusal' ? 338 : 298;
-    const sag = isLoose ? 105 : 22;
-    return `M 347 ${startY} C 575 ${startY + sag}, ${endX - 235} ${endY + sag}, ${endX} ${endY}`;
-  };
-  const sourceFor = (chapter, name) => {
-    if (chapter === 0 && ['soften', 'takeup', 'tight-1', 'tight-2', 'crouch-1', 'lift', 'land'].includes(name)) return `assets/cels/inbetweens/ch1-${name}.webp`;
-    const filePrefix = `ch${chapter + 1}`;
-    if (name === 'land') name = 'replant';
-    if (name === 'lift') name = 'return';
-    if (name === 'soften') name = 'hover';
-    if (chapter === 0 && name === 'crouch-2') name = 'reactionA';
-    const fileName = name.replace('reactionA', 'reaction-a').replace('reactionB', 'reaction-b');
-    return `assets/cels/frames/${filePrefix}-${fileName}.webp`;
-  };
-  const CELS = [0, 1, 2].map((chapter) => Object.fromEntries(NAMES.map((name) => [name, {
-    id: `ch${chapter + 1}-${name}`,
-    src: sourceFor(chapter, name),
-    hitPath: pathFor(chapter, name)
-  }])));
-
-  let state = 'idle';
-  let chapter = 0;
-  let storedProgress = 0;
-  let currentId = '';
-  let drag = null;
-  let queuedDrag = null;
-  let dragRaf = 0;
-  let reactionCursor = 0;
-  const preloadCache = new Map();
-  const decoded = new Set();
-  const retainedImages = new Map();
-  let playback = 0;
-  let requestedFrame = 0;
-  let bounds = stage.getBoundingClientRect();
-  new ResizeObserver(() => { bounds = stage.getBoundingClientRect(); }).observe(stage);
-  window.addEventListener('scroll', () => { bounds = stage.getBoundingClientRect(); }, { passive: true });
-
-  function interruptPlayback() {
-    playback += 1;
-    stage.classList.remove('is-resetting');
-    return playback;
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const stage=$('stage'), canvas=$('scene'), ctx=canvas.getContext('2d',{alpha:false});
+  const poster=$('celCurrent'), cue=$('grabCue'), control=$('leashControl');
+  const meter=$('tensionMeter'), message=$('message'), progress=$('walkProgress');
+  const {clamp,assessPull,mapX}=window.ShibaRules;
+  const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');
+  const frames=window.ShibaFrames;
+  const cache=new Map(), images=new Map();
+  let mode='loading', currentPose='idle', currentImage=null;
+  let distance=0, shownDistance=0, motion=null, drag=null, frameRequest=0, playback=0, raf=0;
+  let bounds=stage.getBoundingClientRect(), lastTime=0, steps=0, gentleSteps=0, reactions=0;
+  let breed='yellow';
+  const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const phase=()=>Math.min(2,Math.floor(distance*3));
+  const chapterNames=['出门的第一步','这块地，值得闻闻','好吧，再陪你走一段'];
+  const initialHint='按住牵引绳向左轻拉，放松一点，再松手。';
+  const pathsFor=()=> breed==='black' ? window.ShibaBlackFrames : frames;
+  function setMode(value) {
+    mode=value; stage.dataset.state=value; stage.dataset.chapter=String(phase()+1);
+    control.disabled=value==='loading'||value==='complete';
+    $('restart').hidden=value!=='complete';
+    $('loading').hidden=value!=='loading';
   }
-
-  function setState(next) {
-    state = next;
-    stage.dataset.state = next;
-    stage.dataset.chapter = String(chapter + 1);
-    stage.classList.toggle('is-locked', next === 'complete');
-    leashControl.disabled = next === 'dragging' || next === 'complete';
+  function say(text) { message.textContent=text; }
+  function updateProgress() {
+    const percent=Math.round(distance*100);
+    progress.value=percent;
+    $('distance').textContent=percent+'%';
+    $('chapter').textContent=distance>=1?'今天的散步，谈成了':chapterNames[phase()];
+    stage.dataset.chapter=String(phase()+1);
+    stage.dataset.progress=String(distance);
+    $('route').style.setProperty('--progress',String(distance));
+    document.querySelectorAll('.route-stop').forEach((node,i)=>node.classList.toggle('visited',distance>=(i+1)/3));
   }
-
   function preload(src) {
-    if (preloadCache.has(src)) return preloadCache.get(src);
-    const task = new Promise((resolve) => {
-      const image = new Image();
-      image.onload = async () => {
-        try {
-          await image.decode();
-          retainedImages.set(src, image);
-          decoded.add(src);
-          resolve(true);
-        } catch { resolve(false); }
-      };
-      image.onerror = () => resolve(false);
-      image.src = src;
-    });
-    preloadCache.set(src, task);
-    return task;
+    if(cache.has(src))return cache.get(src);
+    const task=new Promise(resolve=>{
+      const img=new Image();img.decoding='async';
+      img.onload=async()=>{try{await img.decode();images.set(src,img);resolve(img)}catch{cache.delete(src);resolve(null)}};
+      img.onerror=()=>{cache.delete(src);resolve(null)};img.src=src;
+    });cache.set(src,task);return task;
   }
-
-  function preloadChapter(index) {
-    NAMES.forEach((name) => preload(CELS[index][name].src));
+  async function show(pose) {
+    const request=++frameRequest;
+    const src=pathsFor()[pose];
+    const img=images.get(src)||await preload(src);
+    if(!img||request!==frameRequest)return false;
+    currentImage=img;currentPose=pose;stage.dataset.pose=pose;
+    render();return true;
   }
-
-  function displayProgress(value) {
-    return MIN_BAR + (1 - MIN_BAR) * Math.max(0, Math.min(1, value));
+  function render() {
+    if(!currentImage)return;
+    const img=currentImage,w=img.naturalWidth,h=img.naturalHeight;
+    const x=shownDistance*220;
+    const draw=(sx,sw,dx,dw)=>ctx.drawImage(img,sx/1536*w,0,sw/1536*w,h,dx,0,dw,512);
+    draw(1484,52,0,1536); // existing unpainted paper margin, no generated background
+    draw(0,480,0,480);
+    draw(480,420,480,420-x);
+    draw(900,636,900-x,636);
+    poster.hidden=true;canvas.hidden=false;
+    stage.dataset.position=shownDistance.toFixed(4);
+    const endX=mapX(currentPose==='refusal'?1060:1035,x);
+    $('ropeHit').setAttribute('d',`M 315 240 Q ${mapX(700,x)} ${['idle','hover','soften','replant','settled'].includes(currentPose)?430:295} ${endX} 300`);
   }
-
-  function setProgress(value) {
-    fluidProgress.style.setProperty('--fill', String(displayProgress(value)));
+  function invalidate() {playback++;frameRequest++;return playback;}
+  async function sequence(items,token) {
+    for(const [pose,ms] of items){if(token!==playback)return false;await show(pose);if(token!==playback)return false;await wait(reduced.matches?20:ms)}
+    return token===playback;
   }
-
-  function showNow(frame) {
-    const request = ++requestedFrame;
-    const paint = () => {
-      if (request !== requestedFrame) return;
-      ropeHit.setAttribute('d', frame.hitPath);
-      if (currentId !== frame.id) {
-        currentCel.src = frame.src;
-        currentId = frame.id;
-      }
-    };
-    if (decoded.has(frame.src)) paint();
-    else preload(frame.src).then((ready) => { if (ready) paint(); });
-  }
-
-  async function showFrame(frame, hold = 105, fade = false, token = playback) {
-    if (!(await preload(frame.src)) || token !== playback) return false;
-    // Direct, decoded swaps avoid both ghosting and a blocking crossfade.
-    showNow(frame);
-    await PAUSE(REDUCED ? 24 : hold);
-    return token === playback;
-  }
-
-  async function play(names, hold = 92, token = playback, scene = chapter) {
-    for (const name of names) {
-      if (!(await showFrame(CELS[scene][name], ['return', 'lift', 'slide', 'land'].includes(name) ? hold / 2 : hold, false, token))) return false;
+  function wake() {if(!raf)raf=requestAnimationFrame(tick)}
+  function tick(now) {
+    raf=0;const dt=lastTime?Math.min(50,now-lastTime):0;lastTime=now;
+    if(motion){const t=clamp((now-motion.start)/motion.duration);shownDistance=motion.from+(distance-motion.from)*(1-Math.pow(1-t,3));render();if(t>=1)motion=null;}
+    if(drag){
+      const tension=clamp((drag.startX-drag.x)/(bounds.width*.22));
+      drag.tension=tension;drag.peak=Math.max(drag.peak,tension);
+      drag.valid=drag.startX-drag.x>=4||drag.valid;
+      if(tension>=.22&&tension<=.7)drag.gentleMs+=dt;
+      paintDrag(tension);
     }
-    return token === playback;
+    if(drag||motion)wake();else lastTime=0;
   }
-
-  function updateCuePosition(clientX, clientY) {
-    grabCue.style.setProperty('--cue-x', `${Math.max(0, Math.min(bounds.width, clientX - bounds.left))}px`);
-    grabCue.style.setProperty('--cue-y', `${Math.max(0, Math.min(bounds.height, clientY - bounds.top))}px`);
+  function tensionPose(t) {
+    const list=['soften','hover','takeup','pull','tight-1','brace','tight-2','crouch-1',reactions%2?'reactionB':'reactionA','turn-1','turn','turn-2','refusal'];
+    return list[Math.min(list.length-1,Math.floor(t*list.length))];
   }
-
-  function tensionFor(clientX, startX) {
-    const width = bounds.width;
-    const distance = Math.max(0, startX - clientX);
-    const validDistance = VALID_DRAG;
-    const fullDistance = width * FULL_DRAG;
-    return { distance, tension: Math.min(1, distance / fullDistance), valid: distance >= validDistance };
+  function paintDrag(t) {
+    const pose=tensionPose(t);if(pose!==currentPose)show(pose);
+    const x=clamp(drag.x-bounds.left,0,bounds.width), y=clamp(drag.y-bounds.top,0,bounds.height);
+    cue.style.transform=`translate3d(${x}px,${y}px,0)`;
+    cue.style.setProperty('--tension',String(t));
+    meter.value=t;stage.dataset.tension=t.toFixed(3);
+    const feeling=t>.86?'strong':t>=.22&&t<=.7?'gentle':'loose';
+    stage.dataset.feeling=feeling;
+    $('tensionLabel').textContent=feeling==='strong'?'它开始较劲了':feeling==='gentle'?'这个力度刚刚好':'轻轻收绳';
   }
-
-  function gainFor(tension) {
-    return .035 + .105 * Math.pow(tension, .85);
+  function start(event) {
+    if(drag||!['idle','settling'].includes(mode)||event.button!==0||event.isPrimary===false||event.target.closest('button'))return;
+    event.preventDefault();invalidate();bounds=stage.getBoundingClientRect();
+    drag={pointerId:event.pointerId,startX:event.clientX,x:event.clientX,y:event.clientY,tension:0,peak:0,gentleMs:0,valid:false};
+    stage.setPointerCapture(event.pointerId);stage.classList.add('is-dragging');setMode('dragging');
+    paintDrag(0);wake();
   }
-
-  function frameForTension(tension, variant) {
-    if (tension < .04) return 'soften';
-    if (tension < .08) return 'hover';
-    if (tension < .18) return 'takeup';
-    if (tension < .28) return 'pull';
-    if (tension < .38) return 'tight-1';
-    if (tension < .48) return 'brace';
-    if (tension < .58) return 'tight-2';
-    if (tension < .66) return 'crouch-1';
-    if (tension < .74) return 'crouch-2';
-    if (tension < .80) return variant;
-    if (tension < .86) return 'turn-1';
-    if (tension < .92) return 'turn';
-    if (tension < .97) return 'turn-2';
-    return 'refusal';
+  function move(event){if(drag&&event.pointerId===drag.pointerId){drag.x=event.clientX;drag.y=event.clientY}}
+  function cleanDrag() {
+    const pointer=drag?.pointerId;drag=null;stage.classList.remove('is-dragging');meter.value=0;
+    stage.dataset.feeling='loose';stage.dataset.tension='0';$('tensionLabel').textContent='轻拉 · 观察 · 松绳';
+    if(pointer!==undefined&&stage.hasPointerCapture(pointer))stage.releasePointerCapture(pointer);
   }
-
-  function setHover(event) {
-    if (state !== 'idle') return;
-    updateCuePosition(event.clientX, event.clientY);
-    stage.classList.add('is-hovering');
-    showNow(CELS[chapter].hover);
+  function end(event) {
+    if(!drag||event.pointerId!==drag.pointerId)return;
+    drag.tension=clamp((drag.startX-event.clientX)/(bounds.width*.22));
+    drag.peak=Math.max(drag.peak,drag.tension);drag.valid=drag.valid||drag.startX-event.clientX>=4;
+    const pull={...drag};cleanDrag();setMode('idle');commit(pull);
   }
-
-  function clearHover() {
-    if (state !== 'idle') return;
-    stage.classList.remove('is-hovering');
-    showNow(CELS[chapter].idle);
+  function cancel(event) {
+    if(!drag||(event?.pointerId!==undefined&&event.pointerId!==drag.pointerId))return;
+    invalidate();cleanDrag();setMode('idle');show(distance?'replant':'idle');
   }
-
-  function applyDrag(clientX, clientY) {
-    if (!drag || state !== 'dragging') return;
-    const pull = tensionFor(clientX, drag.startX);
-    drag.distance = pull.distance;
-    drag.tension = pull.tension;
-    drag.valid = pull.valid;
-    drag.preview = frameForTension(pull.tension, drag.variant);
-    updateCuePosition(clientX, clientY);
-    stage.style.setProperty('--grab-tightness', String(pull.tension));
-    stage.style.setProperty('--scene-sway', `${Math.min(10, pull.distance * .055)}px`);
-    grabCue.style.setProperty('--cue-shift', `${-Math.min(18, pull.distance * .08)}px`);
-    const previewProgress = pull.valid ? Math.min(1, storedProgress + gainFor(pull.tension)) : storedProgress;
-    fluidProgress.style.setProperty('--drag-fill', String(displayProgress(previewProgress)));
-    fluidProgress.style.setProperty('--drag-energy', String(pull.tension));
-    showNow(CELS[chapter][drag.preview]);
-  }
-
-  function queueDrag(clientX, clientY) {
-    queuedDrag = [clientX, clientY];
-    if (dragRaf) return;
-    dragRaf = requestAnimationFrame(() => {
-      dragRaf = 0;
-      if (queuedDrag) applyDrag(...queuedDrag);
-    });
-  }
-
-  function stopDragging() {
-    if (dragRaf) cancelAnimationFrame(dragRaf);
-    dragRaf = 0;
-    queuedDrag = null;
-    stage.classList.remove('is-dragging');
-    stage.style.removeProperty('--grab-tightness');
-    stage.style.removeProperty('--scene-sway');
-    grabCue.style.removeProperty('--cue-shift');
-    fluidProgress.classList.remove('is-dragging');
-    fluidProgress.style.removeProperty('--drag-fill');
-    fluidProgress.style.removeProperty('--drag-energy');
-  }
-
-  function settleFrames(preview, variant, crossedMilestone) {
-    const tensionPath = ['soften', 'hover', 'takeup', 'pull', 'tight-1', 'brace', 'tight-2', 'crouch-1', 'crouch-2', variant, 'turn-1', 'turn', 'turn-2', 'refusal'];
-    const currentIndex = Math.max(0, tensionPath.indexOf(preview));
-    if (crossedMilestone) {
-      return [...tensionPath.slice(currentIndex + 1), 'return', 'lift', 'slide-1', 'slide', 'land', 'replant'];
-    }
-    if (preview === 'refusal') return ['return', 'settled'];
-    if (['turn-1', 'turn', 'turn-2'].includes(preview)) return [...tensionPath.slice(currentIndex + 1), 'return', 'settled'];
-    if (preview === 'reactionA' || preview === 'reactionB') return ['settled'];
-    return [tensionPath[Math.min(currentIndex + 1, tensionPath.length - 1)], 'settled'];
-  }
-
-  async function resetAfterComplete(token) {
-    await PAUSE(REDUCED ? 160 : 1500);
-    if (token !== playback) return;
-    fluidProgress.classList.remove('is-complete');
-    chapter = 0;
-    storedProgress = 0;
-    setProgress(storedProgress);
-    await showFrame(CELS[0].idle, 100, false, token);
-    if (token === playback) setState('idle');
-  }
-
-  async function commitPull({ tension = .6, preview = 'brace', variant = 'reactionA', valid = true } = {}) {
-    if (!['idle', 'settling'].includes(state)) return;
-    const token = interruptPlayback();
-    if (!valid) {
-      showNow(CELS[chapter].idle);
+  async function commit(pull) {
+    if(!['idle','settling'].includes(mode))return;
+    const token=invalidate();const result=assessPull(pull);
+    if(result.kind==='cancel'){show(distance?'replant':'idle');return}
+    setMode('settling');
+    if(result.kind==='refusal') {
+      reactions++;say('它把四只脚都钉住了。试着拉轻一点。');
+      if(await sequence([['turn-1',60],['turn',70],['turn-2',70],['refusal',240],['return',65],['land',55],['replant',45]],token))setMode('idle');
       return;
     }
-
-    const before = storedProgress;
-    const beforeChapter = Math.min(2, Math.floor(before * 3));
-    storedProgress = Math.min(1, before + gainFor(tension));
-    const afterChapter = Math.min(3, Math.floor(storedProgress * 3));
-    const crossedMilestone = afterChapter > beforeChapter || storedProgress === 1;
-    setProgress(storedProgress);
-    const scene = chapter;
-    if (crossedMilestone) chapter = Math.min(2, afterChapter);
-    setState('settling');
-    if (!(await play(settleFrames(preview, variant, crossedMilestone), crossedMilestone ? 118 : 82, token, scene))) return;
-
-    if (crossedMilestone) {
-      if (afterChapter === 3) {
-        fluidProgress.classList.add('is-complete');
-        setState('complete');
-        resetAfterComplete(token);
-        return;
-      }
-      chapter = afterChapter;
-      preloadChapter(chapter);
-      if (!(await showFrame(CELS[chapter].idle, 0, false, token))) return;
-    }
-    setState('idle');
+    distance=clamp(distance+result.gain);steps++;if(result.kind==='trust')gentleSteps++;
+    updateProgress();motion={from:shownDistance,start:performance.now(),duration:reduced.matches?1:620};wake();
+    say(result.kind==='trust'?'一松绳，它就懂了。默契 +1。':result.kind==='small'?'好吧，先挪一点点。':'它悄悄跟上了一小步。');
+    const finished=await sequence([['return',65],['lift',55],['slide-1',65],['slide',55],['land',60],['replant',80]],token);
+    if(!finished)return;
+    if(distance>=1){setMode('complete');$('result').hidden=false;$('resultTitle').textContent=gentleSteps>2?'你们有点默契了。':'今天，是它带你散步。';$('resultDetail').textContent=`${steps} 次小步，${gentleSteps} 次默契松绳。明天还一起走。`;say('散步完成。可以切换柴犬留作纪念，或再走一圈。');}
+    else setMode('idle');
   }
-
-  function beginPointer(event) {
-    if (!['idle', 'settling'].includes(state) || event.button !== 0 || event.isPrimary === false) return;
-    event.preventDefault();
-    interruptPlayback();
-    bounds = stage.getBoundingClientRect();
-    stage.classList.remove('is-hovering');
-    const variant = reactionCursor % 2 === 0 ? 'reactionA' : 'reactionB';
-    drag = { startX: event.clientX, pointerId: event.pointerId, tension: 0, valid: false, preview: 'hover', variant };
-    setState('dragging');
-    stage.classList.add('is-dragging');
-    fluidProgress.classList.add('is-dragging');
-    updateCuePosition(event.clientX, event.clientY);
-    ropeHit.setPointerCapture?.(event.pointerId);
-    applyDrag(event.clientX, event.clientY);
+  function restart() {
+    invalidate();cleanDrag();distance=0;shownDistance=0;motion=null;steps=0;gentleSteps=0;reactions=0;
+    $('result').hidden=true;updateProgress();setMode('idle');show('idle');say(initialHint);
   }
-
-  function movePointer(event) {
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    queueDrag(event.clientX, event.clientY);
+  async function boot() {
+    const token=playback;setMode('loading');
+    const first=await preload(pathsFor().idle);
+    if(token!==playback)return;
+    if(!first){$('loading').textContent='插画还没准备好，点击重试';$('loading').onclick=boot;return;}
+    await show('idle');setMode('idle');say(initialHint);
+    // Load common response first, then remaining frames, bounded concurrency.
+    const order=[...new Set(['soften','hover','takeup','pull','tight-1','brace','return','lift','slide','land','replant',...Object.keys(pathsFor())])];
+    let cursor=0;const work=async()=>{while(cursor<order.length)await preload(pathsFor()[order[cursor++]]);};
+    await Promise.all([work(),work(),work()]);
   }
-
-  function endPointer(event) {
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    applyDrag(event.clientX, event.clientY);
-    const result = { tension: drag.tension, preview: drag.preview, variant: drag.variant, valid: drag.valid };
-    if (result.valid) reactionCursor += 1;
-    drag = null;
-    if (ropeHit.hasPointerCapture?.(event.pointerId)) ropeHit.releasePointerCapture(event.pointerId);
-    stopDragging();
-    setState('idle');
-    commitPull(result);
-  }
-
-  function cancelPointer(event) {
-    if (!drag || (event && event.pointerId !== drag.pointerId)) return;
-    drag = null;
-    stopDragging();
-    setState('idle');
-    showNow(CELS[chapter].idle);
-  }
-
-  ropeHit.addEventListener('pointerdown', beginPointer);
-  ropeHit.addEventListener('pointermove', movePointer);
-  ropeHit.addEventListener('pointerup', endPointer);
-  ropeHit.addEventListener('pointercancel', cancelPointer);
-  ropeHit.addEventListener('lostpointercapture', cancelPointer);
-  window.addEventListener('blur', () => cancelPointer());
-  ropeHit.addEventListener('pointerenter', setHover);
-  ropeHit.addEventListener('pointerleave', clearHover);
-  leashControl.addEventListener('click', (event) => { event.preventDefault(); commitPull(); });
-  leashControl.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    if (!event.repeat) commitPull();
-  });
-
-  setProgress(storedProgress);
-  showNow(CELS[0].idle);
-  setState('idle');
-  CELS.forEach((_, index) => preloadChapter(index));
+  stage.addEventListener('pointerdown',start);stage.addEventListener('pointermove',move);stage.addEventListener('pointerup',end);
+  stage.addEventListener('pointercancel',cancel);stage.addEventListener('lostpointercapture',cancel);
+  window.addEventListener('blur',()=>cancel());
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)cancel()});
+  new ResizeObserver(()=>{bounds=stage.getBoundingClientRect();if(drag)cancel()}).observe(stage);
+  window.addEventListener('scroll',()=>{bounds=stage.getBoundingClientRect()},{passive:true});
+  control.addEventListener('click',()=>commit({tension:.42,peak:.55,gentleMs:420,valid:true}));
+  control.addEventListener('keydown',event=>{if(event.repeat&&(event.key===' '||event.key==='Enter'))event.preventDefault()});
+  $('restart').addEventListener('click',restart);
+  updateProgress();boot();
 })();
