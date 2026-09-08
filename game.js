@@ -4,19 +4,46 @@
   const stage=$('stage'), canvas=$('scene'), ctx=canvas.getContext('2d',{alpha:false});
   const poster=$('celCurrent'), cue=$('grabCue'), control=$('leashControl');
   const meter=$('tensionMeter'), message=$('message'), progress=$('walkProgress');
-  const {clamp,assessPull,mapX}=window.ShibaRules;
+  const {clamp,assessPull,mapX,mapSpan}=window.ShibaRules;
   const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');
   const frames=window.ShibaFrames;
   const cache=new Map(), images=new Map();
   let mode='loading', currentPose='idle', currentImage=null;
   let distance=0, shownDistance=0, motion=null, drag=null, frameRequest=0, playback=0, raf=0;
   let bounds=stage.getBoundingClientRect(), lastTime=0, steps=0, gentleSteps=0, reactions=0;
-  let breed='yellow';
+  let breed='yellow', breedRequest=0;
+  try { if(localStorage.getItem('shiba-breed')==='black')breed='black'; } catch {}
   const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const phase=()=>Math.min(2,Math.floor(distance*3));
   const chapterNames=['出门的第一步','这块地，值得闻闻','好吧，再陪你走一段'];
   const initialHint='按住牵引绳向左轻拉，放松一点，再松手。';
   const pathsFor=()=> breed==='black' ? window.ShibaBlackFrames : frames;
+  function updateBreedUI() {
+    stage.dataset.breed=breed;
+    document.querySelectorAll('button[data-breed]').forEach(button=>{
+      const selected=button.dataset.breed===breed;
+      button.setAttribute('aria-pressed',String(selected));button.classList.toggle('selected',selected);
+    });
+    canvas.setAttribute('aria-label',`一只${breed==='black'?'黑柴':'黄柴'}，正和你商量着散步。`);
+  }
+  async function switchBreed(next) {
+    const request=++breedRequest;
+    if(next===breed){$('breedStatus').textContent='';return;}
+    $('breedStatus').textContent=`正在准备${next==='black'?'黑柴':'黄柴'}…`;
+    const paths=next==='black'?window.ShibaBlackFrames:frames;
+    const names=Object.keys(paths);let cursor=0, failed=false;
+    const load=async()=>{while(cursor<names.length){if(request!==breedRequest)return;const name=names[cursor++];if(!await preload(paths[name]))failed=true;}};
+    await Promise.all([load(),load(),load()]);
+    if(request!==breedRequest)return;
+    if(failed){$('breedStatus').textContent='插画加载失败，请再选一次重试。';return;}
+    const pose=currentPose;invalidate();cleanDrag();breed=next;
+    currentImage=images.get(paths[pose]);currentPose=pose;render();updateBreedUI();
+    setMode(distance>=1?'complete':'idle');$('breedStatus').textContent='';
+    try {localStorage.setItem('shiba-breed',breed);} catch {}
+    // Retain only the selected skin's decoded bitmaps; HTTP cache remains reusable.
+    const keep=new Set(Object.values(paths));
+    for(const src of images.keys())if(!keep.has(src)){images.delete(src);cache.delete(src);}
+  }
   function setMode(value) {
     mode=value; stage.dataset.state=value; stage.dataset.chapter=String(phase()+1);
     control.disabled=value==='loading'||value==='complete';
@@ -32,7 +59,7 @@
     stage.dataset.chapter=String(phase()+1);
     stage.dataset.progress=String(distance);
     $('route').style.setProperty('--progress',String(distance));
-    document.querySelectorAll('.route-stop').forEach((node,i)=>node.classList.toggle('visited',distance>=(i+1)/3));
+    document.querySelectorAll('.route-stop').forEach((node,i)=>node.classList.toggle('visited',distance>=i/2));
   }
   function preload(src) {
     if(cache.has(src))return cache.get(src);
@@ -53,16 +80,26 @@
   function render() {
     if(!currentImage)return;
     const img=currentImage,w=img.naturalWidth,h=img.naturalHeight;
-    const x=shownDistance*220;
-    const draw=(sx,sw,dx,dw)=>ctx.drawImage(img,sx/1536*w,0,sw/1536*w,h,dx,0,dw,512);
-    draw(1484,52,0,1536); // existing unpainted paper margin, no generated background
-    draw(0,480,0,480);
-    draw(480,420,480,420-x);
-    draw(900,636,900-x,636);
+    const mobile=bounds.width<=620;
+    const cw=mobile?1024:1536,ch=mobile?640:512,y=mobile?64:0;
+    if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch;}
+    const x=shownDistance*(mobile?80:220);
+    const draw=(sx,sw,dx,dw)=>ctx.drawImage(img,sx/1536*w,0,sw/1536*w,h,dx,y,dw,512);
+    ctx.drawImage(img,1484/1536*w,0,52/1536*w,h/4,0,0,cw,ch);
+    const start=mobile?300:480,span=(mobile?120:420)-x;
+    // Smooth derivative at both joins prevents a visible elbow in the curved leash.
+    for(let sx=0;sx<420;sx+=4){
+      const left=mapSpan(sx,420,span),right=mapSpan(sx+4,420,span);
+      draw(480+sx,4,start+left,right-left+.35);
+    }
+    if(mobile){draw(180,300,0,300);draw(900,636,420-x,636);}
+    else{draw(0,480,0,480);draw(900,636,900-x,636);}
     poster.hidden=true;canvas.hidden=false;
     stage.dataset.position=shownDistance.toFixed(4);
-    const endX=mapX(currentPose==='refusal'?1060:1035,x);
-    $('ropeHit').setAttribute('d',`M 315 240 Q ${mapX(700,x)} ${['idle','hover','soften','replant','settled'].includes(currentPose)?430:295} ${endX} 300`);
+    const end=currentPose==='refusal'?1060:1035;
+    const endX=mobile?end-900+420-x:mapX(end,x);
+    $('ropeHit').parentElement.setAttribute('viewBox',`0 0 ${cw} ${ch}`);
+    $('ropeHit').setAttribute('d',`M ${mobile?135:315} ${240+y} Q ${mobile?360:mapX(700,x)} ${(['idle','hover','soften','replant','settled'].includes(currentPose)?430:295)+y} ${endX} ${300+y}`);
   }
   function invalidate() {playback++;frameRequest++;return playback;}
   async function sequence(items,token) {
@@ -100,7 +137,7 @@
     if(drag||!['idle','settling'].includes(mode)||event.button!==0||event.isPrimary===false||event.target.closest('button'))return;
     event.preventDefault();invalidate();bounds=stage.getBoundingClientRect();
     drag={pointerId:event.pointerId,startX:event.clientX,x:event.clientX,y:event.clientY,tension:0,peak:0,gentleMs:0,valid:false};
-    stage.setPointerCapture(event.pointerId);stage.classList.add('is-dragging');setMode('dragging');
+    try {stage.setPointerCapture(event.pointerId);} catch {}stage.classList.add('is-dragging');setMode('dragging');
     paintDrag(0);wake();
   }
   function move(event){if(drag&&event.pointerId===drag.pointerId){drag.x=event.clientX;drag.y=event.clientY}}
@@ -156,10 +193,11 @@
   stage.addEventListener('pointercancel',cancel);stage.addEventListener('lostpointercapture',cancel);
   window.addEventListener('blur',()=>cancel());
   document.addEventListener('visibilitychange',()=>{if(document.hidden)cancel()});
-  new ResizeObserver(()=>{bounds=stage.getBoundingClientRect();if(drag)cancel()}).observe(stage);
+  new ResizeObserver(()=>{bounds=stage.getBoundingClientRect();if(drag)cancel();render()}).observe(stage);
   window.addEventListener('scroll',()=>{bounds=stage.getBoundingClientRect()},{passive:true});
   control.addEventListener('click',()=>commit({tension:.42,peak:.55,gentleMs:420,valid:true}));
   control.addEventListener('keydown',event=>{if(event.repeat&&(event.key===' '||event.key==='Enter'))event.preventDefault()});
   $('restart').addEventListener('click',restart);
-  updateProgress();boot();
+  document.querySelectorAll('button[data-breed]').forEach(button=>button.addEventListener('click',()=>switchBreed(button.dataset.breed)));
+  updateBreedUI();updateProgress();boot();
 })();

@@ -7,12 +7,13 @@ async function game(){
   const schedule=(fn,ms=0)=>{jobs.set(++id,{fn,at:time+ms});return id};
   const element=()=>{const events={},styles=new Map(),classes=new Set();return{events,dataset:{},hidden:false,value:0,textContent:'',naturalWidth:1536,naturalHeight:512,
     style:{setProperty:(k,v)=>styles.set(k,v)},classList:{add:(...xs)=>xs.forEach(x=>classes.add(x)),remove:(...xs)=>xs.forEach(x=>classes.delete(x)),toggle:(x,b)=>b?classes.add(x):classes.delete(x)},
-    addEventListener:(k,f)=>events[k]=f,setAttribute(){},getBoundingClientRect:()=>({left:0,top:0,width:1280,height:426}),getContext:()=>({drawImage(){}}),setPointerCapture(){},hasPointerCapture:()=>false};};
+    parentElement:{setAttribute(){}},addEventListener:(k,f)=>events[k]=f,setAttribute(){},getBoundingClientRect:()=>({left:0,top:0,width:1280,height:426}),getContext:()=>({drawImage(){}}),setPointerCapture(){},hasPointerCapture:()=>false};};
   const get=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id)};
-  const document={getElementById:get,querySelectorAll:()=>[element(),element(),element()],addEventListener(){}};
+  const breeds=[get('yellow'),get('black')];breeds[0].dataset.breed='yellow';breeds[1].dataset.breed='black';
+  const document={getElementById:get,querySelectorAll:selector=>selector.includes('data-breed')?breeds:[element(),element(),element()],addEventListener(){}};
   const window={matchMedia:()=>({matches:false}),addEventListener(){}};
   const context={window,document,setTimeout:schedule,performance:{now:()=>time},requestAnimationFrame:fn=>schedule(()=>fn(time),16),ResizeObserver:class{observe(){}},Image:class{constructor(){this.naturalWidth=1536;this.naturalHeight=512}set src(v){this.value=v;Promise.resolve().then(()=>this.onload())}decode(){return Promise.resolve()}}};
-  for(const file of ['mechanics.js','frames.js','game.js'])vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
+  for(const file of ['mechanics.js','frames.js','black-frames.js','game.js'])vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
   const flush=async()=>{for(let n=0;n<100;n++)await Promise.resolve()};
   const tick=async ms=>{const end=time+ms;await flush();while(true){const next=[...jobs].filter(([,v])=>v.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!next)break;jobs.delete(next[0]);time=next[1].at;next[1].fn();await flush()}time=end;await flush()};
   const send=(type,x=600)=>get('stage').events[type]({clientX:x,clientY:250,pointerId:1,button:0,isPrimary:true,preventDefault(){},target:{closest:()=>null}});
@@ -41,4 +42,12 @@ test('rapid steps retain position, finish persists, restart resets the walk',asy
   assert.equal(g.get('stage').dataset.state,'complete');assert.equal(g.get('stage').dataset.progress,'1');assert.equal(g.get('stage').dataset.position,'1.0000');
   await g.tick(5000);assert.equal(g.get('stage').dataset.state,'complete');
   g.get('restart').events.click();await g.tick(20);assert.equal(g.get('stage').dataset.progress,'0');assert.equal(g.get('stage').dataset.state,'idle');
+});
+
+test('switching breed during a step preserves distance and cancels stale playback',async()=>{
+  const g=await game();g.get('leashControl').events.click();await g.tick(30);
+  const distance=g.get('stage').dataset.progress;
+  g.get('black').events.click();await g.tick(1000);
+  assert.equal(g.get('stage').dataset.breed,'black');assert.equal(g.get('stage').dataset.progress,distance);assert.equal(g.get('stage').dataset.state,'idle');
+  g.get('yellow').events.click();await g.tick(1000);assert.equal(g.get('stage').dataset.breed,'yellow');assert.equal(g.get('stage').dataset.progress,distance);
 });

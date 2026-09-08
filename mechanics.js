@@ -11,8 +11,15 @@
   }
   // Whole cel stays intact: keep hand rigid, shorten only the leash span,
   // translate the rigid dog region. The rightmost paper margin fills the reveal.
-  const mapX = (x, distance) => x < 480 ? x : x < 900 ? 480+(x-480)*(420-distance)/420 : x-distance;
-  const api={clamp,assessPull,mapX};
+  function mapSpan(x, length, span) {
+    const edge=Math.min(40,span*.4), k=(span-edge)/(length-edge);
+    const first=v=>{const t=v/edge;return v-(1-k)*edge*(t*t*t-.5*t*t*t*t);};
+    if(x<edge)return first(x);
+    if(x>length-edge)return span-first(length-x);
+    return edge*(1+k)/2+(x-edge)*k;
+  }
+  const mapX = (x, distance) => x < 480 ? x : x < 900 ? 480+mapSpan(x-480,420,420-distance) : x-distance;
+  const api={clamp,assessPull,mapX,mapSpan};
   if(typeof module !== 'undefined') module.exports=api;
   else root.ShibaRules=api;
 })(typeof window !== 'undefined' ? window : this);

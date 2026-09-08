@@ -3,11 +3,14 @@
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>小柴的散步谈判</title><meta name="description" content="轻拉、观察、松绳。和一只倔柴，谈一场小小的散步。"><link rel="stylesheet" href="styles.css"></head>
 <body>
 <main class="toy-shell"><section class="toy" aria-label="小柴散步游戏">
-<header class="game-header"><div><p class="eyebrow">SHIBA TUG · 小柴日常</p><h1>散步，也要商量。</h1></div><span class="edition">一场很小的冒险</span></header>
+<header class="game-header"><div><p class="eyebrow">SHIBA TUG · 小柴日常</p><h1>散步，也要商量。</h1></div><div class="breed-picker" role="group" aria-label="选择柴犬">
+<button type="button" class="breed selected" data-breed="yellow" aria-pressed="true"><span class="breed-portrait yellow" aria-hidden="true"></span><span>黄柴</span></button>
+<button type="button" class="breed" data-breed="black" aria-pressed="false"><span class="breed-portrait black" aria-hidden="true"></span><span>黑柴</span></button>
+<span id="breedStatus" class="breed-status" role="status"></span></div></header>
 <div class="walk-heading"><span id="chapter">出门的第一步</span><span><b id="distance">0%</b> 的散步</span></div>
 <div class="stage" id="stage" data-state="loading" data-chapter="1">
 <img id="celCurrent" class="poster" src="assets/cels/frames/ch1-idle.webp" draggable="false" alt="一只黄柴站在红色牵引绳另一端，固执地等着你。">
-<canvas id="scene" width="1536" height="512" hidden aria-hidden="true"></canvas>
+<canvas id="scene" width="1536" height="512" hidden role="img" aria-label="牵引绳另一端的一只手绘柴犬"></canvas>
 <svg class="hit-layer" viewBox="0 0 1536 512" preserveAspectRatio="none" aria-hidden="true"><path id="ropeHit" class="rope-hit" d="M315 240 Q700 430 1035 300"/></svg>
 <div id="grabCue" class="grab-cue" aria-hidden="true"><i></i></div>
 <button id="loading" class="loading" type="button">小柴正在穿牵引绳…</button>
@@ -20,5 +23,5 @@
 <button id="restart" class="quiet-button restart" type="button" hidden>再走一圈 ↻</button>
 <footer>不着急。散步的意义，是一起走。</footer>
 </section></main>
-<script src="mechanics.js"></script><script src="frames.js"></script><script src="game.js"></script>
+<script src="mechanics.js"></script><script src="frames.js"></script><script src="black-frames.js"></script><script src="game.js"></script>
 </body></html>
