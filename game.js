@@ -8,7 +8,9 @@
   const grabCue = document.querySelector('#grabCue');
   const PAUSE = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
   const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const DRAG_DISTANCE = 250;
+  const VALID_DRAG = .04;
+  const FULL_DRAG = .22;
+  const MIN_BAR = .035;
 
   const NAMES = ['idle', 'hover', 'pull', 'brace', 'reactionA', 'reactionB', 'turn', 'refusal', 'return', 'slide', 'replant', 'settled'];
   const pathFor = (chapter, name) => {
@@ -32,12 +34,12 @@
 
   let state = 'idle';
   let chapter = 0;
-  let pulls = 0;
+  let storedProgress = 0;
   let currentId = '';
-  let lockedProgress = .035;
   let drag = null;
   let queuedDrag = null;
   let dragRaf = 0;
+  let reactionCursor = 0;
   const preloadCache = new Map();
 
   function setState(next) {
@@ -60,29 +62,16 @@
     return task;
   }
 
-  function preloadNames(names) {
-    names.forEach((name) => preload(CELS[chapter][name].src));
-  }
-
   function preloadChapter(index) {
     NAMES.forEach((name) => preload(CELS[index][name].src));
   }
 
+  function displayProgress(value) {
+    return MIN_BAR + (1 - MIN_BAR) * Math.max(0, Math.min(1, value));
+  }
+
   function setProgress(value) {
-    fluidProgress.style.setProperty('--fill', String(value));
-  }
-
-  async function pullProgress() {
-    const peak = Math.min(.96, lockedProgress + .145);
-    fluidProgress.style.setProperty('--pull-fill', String(peak));
-    fluidProgress.classList.add('is-pulling');
-    await PAUSE(REDUCED ? 20 : 145);
-    fluidProgress.classList.remove('is-pulling');
-  }
-
-  function lockProgress() {
-    lockedProgress = chapter === 2 ? 1 : .035 + ((chapter + 1) / 3) * .95;
-    setProgress(lockedProgress);
+    fluidProgress.style.setProperty('--fill', String(displayProgress(value)));
   }
 
   function showNow(frame) {
@@ -94,8 +83,7 @@
   }
 
   async function showFrame(frame, hold = 105, fade = false) {
-    const ready = await preload(frame.src);
-    if (!ready) return false;
+    if (!(await preload(frame.src))) return false;
     if (currentId !== frame.id) {
       if (fade && currentCel.getAttribute('src')) {
         previousCel.src = currentCel.src;
@@ -103,20 +91,19 @@
         currentId = frame.id;
         ropeHit.setAttribute('d', frame.hitPath);
         stage.classList.add('is-resetting');
-        await new Promise((resolve) => window.requestAnimationFrame(resolve));
-        await PAUSE(REDUCED ? 20 : 340);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await PAUSE(REDUCED ? 20 : 250);
         stage.classList.remove('is-resetting');
       } else {
         showNow(frame);
-        await new Promise((resolve) => window.requestAnimationFrame(resolve));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
       }
     }
-    await PAUSE(REDUCED ? 28 : hold);
+    await PAUSE(REDUCED ? 24 : hold);
     return true;
   }
 
-  async function play(names, hold = 105) {
-    preloadNames(names);
+  async function play(names, hold = 92) {
     for (const name of names) {
       if (!(await showFrame(CELS[chapter][name], hold))) return false;
     }
@@ -125,10 +112,30 @@
 
   function updateCuePosition(clientX, clientY) {
     const bounds = stage.getBoundingClientRect();
-    const x = Math.max(0, Math.min(bounds.width, clientX - bounds.left));
-    const y = Math.max(0, Math.min(bounds.height, clientY - bounds.top));
-    grabCue.style.setProperty('--cue-x', `${x}px`);
-    grabCue.style.setProperty('--cue-y', `${y}px`);
+    grabCue.style.setProperty('--cue-x', `${Math.max(0, Math.min(bounds.width, clientX - bounds.left))}px`);
+    grabCue.style.setProperty('--cue-y', `${Math.max(0, Math.min(bounds.height, clientY - bounds.top))}px`);
+  }
+
+  function tensionFor(clientX, startX) {
+    const width = stage.getBoundingClientRect().width;
+    const distance = Math.max(0, startX - clientX);
+    const validDistance = width * VALID_DRAG;
+    const fullDistance = width * FULL_DRAG;
+    if (distance < validDistance) return { distance, tension: 0, valid: false };
+    return { distance, tension: Math.min(1, (distance - validDistance) / (fullDistance - validDistance)), valid: true };
+  }
+
+  function gainFor(tension) {
+    return .035 + .105 * Math.pow(tension, .85);
+  }
+
+  function frameForTension(tension, variant) {
+    if (tension < .12) return 'hover';
+    if (tension < .30) return 'pull';
+    if (tension < .50) return 'brace';
+    if (tension < .68) return variant;
+    if (tension < .84) return 'turn';
+    return 'refusal';
   }
 
   function setHover(event) {
@@ -144,27 +151,21 @@
     showNow(CELS[chapter].idle);
   }
 
-  function setDragPreview(amount) {
-    if (!drag || state !== 'dragging') return;
-    const frame = amount < .18 ? 'hover'
-      : amount < .42 ? 'pull'
-        : pulls < 2 || amount < .68 ? 'brace'
-          : pulls === 3 ? 'turn' : drag.reaction;
-    showNow(CELS[chapter][frame]);
-  }
-
   function applyDrag(clientX, clientY) {
     if (!drag || state !== 'dragging') return;
-    const distance = Math.max(0, drag.startX - clientX);
-    const amount = Math.min(1, distance / DRAG_DISTANCE);
-    drag.amount = amount;
+    const pull = tensionFor(clientX, drag.startX);
+    drag.distance = pull.distance;
+    drag.tension = pull.tension;
+    drag.valid = pull.valid;
+    drag.preview = frameForTension(pull.tension, drag.variant);
     updateCuePosition(clientX, clientY);
-    stage.style.setProperty('--grab-tightness', String(amount));
-    stage.style.setProperty('--scene-sway', `${Math.min(10, distance * .055)}px`);
-    grabCue.style.setProperty('--cue-shift', `${-Math.min(18, distance * .08)}px`);
-    fluidProgress.style.setProperty('--drag-fill', String(Math.min(.98, lockedProgress + amount * .18)));
-    fluidProgress.style.setProperty('--drag-energy', String(amount));
-    setDragPreview(amount);
+    stage.style.setProperty('--grab-tightness', String(pull.tension));
+    stage.style.setProperty('--scene-sway', `${Math.min(10, pull.distance * .055)}px`);
+    grabCue.style.setProperty('--cue-shift', `${-Math.min(18, pull.distance * .08)}px`);
+    const previewProgress = pull.valid ? Math.min(1, storedProgress + gainFor(pull.tension)) : storedProgress;
+    fluidProgress.style.setProperty('--drag-fill', String(displayProgress(previewProgress)));
+    fluidProgress.style.setProperty('--drag-energy', String(pull.tension));
+    showNow(CELS[chapter][drag.preview]);
   }
 
   function queueDrag(clientX, clientY) {
@@ -189,68 +190,64 @@
     fluidProgress.style.removeProperty('--drag-energy');
   }
 
+  function settleFrames(preview, variant, crossedMilestone) {
+    if (crossedMilestone) {
+      if (preview === 'refusal') return ['return', 'slide', 'replant'];
+      if (preview === 'turn') return ['refusal', 'return', 'slide', 'replant'];
+      return [variant, 'turn', 'refusal', 'return', 'slide', 'replant'];
+    }
+    if (preview === 'refusal') return ['return', 'settled'];
+    if (preview === 'turn') return ['refusal', 'return', 'settled'];
+    if (preview === 'reactionA' || preview === 'reactionB') return ['settled'];
+    if (preview === 'brace') return [variant, 'settled'];
+    return ['brace', 'settled'];
+  }
+
   async function resetAfterComplete() {
     await PAUSE(REDUCED ? 160 : 1500);
     fluidProgress.classList.remove('is-complete');
     chapter = 0;
-    pulls = 0;
-    lockedProgress = .035;
-    setProgress(lockedProgress);
-    await showFrame(CELS[0].idle, 120, true);
+    storedProgress = 0;
+    setProgress(storedProgress);
+    await showFrame(CELS[0].idle, 100, true);
     setState('idle');
-    preloadChapter(0);
   }
 
-  async function commitPull({ intensity = 0, reaction = null } = {}) {
+  async function commitPull({ tension = .6, preview = 'brace', variant = 'reactionA', valid = true } = {}) {
     if (state !== 'idle') return;
-    pulls += 1;
-    setState('pull');
-    const progressMotion = pullProgress();
+    if (!valid) {
+      showNow(CELS[chapter].idle);
+      return;
+    }
 
-    if (pulls === 1) {
-      if (intensity >= .42) await showFrame(CELS[chapter].brace, 155);
-      else await play(['hover', 'pull', 'brace'], 88);
-    } else if (pulls === 2) {
-      setState('brace');
-      if (intensity >= .42) await showFrame(CELS[chapter].brace, 155);
-      else await play(['pull', 'brace'], 115);
-    } else if (pulls === 3) {
-      setState('reaction');
-      const reactionFrame = reaction || (Math.random() < .5 ? 'reactionA' : 'reactionB');
-      if (intensity >= .68) await showFrame(CELS[chapter][reactionFrame], 215);
-      else await play(['brace', reactionFrame], 155);
-    } else {
-      setState('refusal');
-      if (intensity >= .68) await showFrame(CELS[chapter].turn, 155);
-      else await play(['brace', 'turn'], 115);
-      await showFrame(CELS[chapter].refusal, 470);
-      setState('slide');
-      await play(['return', 'slide', 'replant', 'settled'], 125);
-      lockProgress();
-      pulls = 0;
+    const before = storedProgress;
+    const beforeChapter = Math.min(2, Math.floor(before * 3));
+    storedProgress = Math.min(1, before + gainFor(tension));
+    const afterChapter = Math.min(3, Math.floor(storedProgress * 3));
+    const crossedMilestone = afterChapter > beforeChapter || storedProgress === 1;
+    setProgress(storedProgress);
+    setState('settling');
+    await play(settleFrames(preview, variant, crossedMilestone), crossedMilestone ? 118 : 82);
 
-      if (chapter === 2) {
-        setState('complete');
+    if (crossedMilestone) {
+      if (afterChapter === 3) {
         fluidProgress.classList.add('is-complete');
-        await progressMotion;
+        setState('complete');
         resetAfterComplete();
         return;
       }
-
-      chapter += 1;
+      chapter = afterChapter;
       preloadChapter(chapter);
-      await showFrame(CELS[chapter].idle, 130, true);
+      await showFrame(CELS[chapter].idle, 90, true);
     }
-
-    await progressMotion;
     setState('idle');
-    preloadChapter(chapter);
   }
 
   function beginPointer(event) {
     if (state !== 'idle') return;
     stage.classList.remove('is-hovering');
-    drag = { startX: event.clientX, amount: 0, pointerId: event.pointerId, reaction: Math.random() < .5 ? 'reactionA' : 'reactionB' };
+    const variant = reactionCursor % 2 === 0 ? 'reactionA' : 'reactionB';
+    drag = { startX: event.clientX, pointerId: event.pointerId, tension: 0, valid: false, preview: 'hover', variant };
     setState('dragging');
     stage.classList.add('is-dragging');
     fluidProgress.classList.add('is-dragging');
@@ -268,18 +265,12 @@
     if (!drag || event.pointerId !== drag.pointerId) return;
     ropeHit.releasePointerCapture?.(event.pointerId);
     applyDrag(event.clientX, event.clientY);
-    const didCommit = drag.amount >= .18;
-    const dragAmount = drag.amount;
-    const dragReaction = drag.reaction;
+    const result = { tension: drag.tension, preview: drag.preview, variant: drag.variant, valid: drag.valid };
+    if (result.valid) reactionCursor += 1;
     drag = null;
     stopDragging();
-    if (didCommit) {
-      setState('idle');
-      commitPull({ intensity: dragAmount, reaction: dragReaction });
-    } else {
-      setState('idle');
-      showNow(CELS[chapter].idle);
-    }
+    setState('idle');
+    commitPull(result);
   }
 
   function cancelPointer(event) {
@@ -303,10 +294,8 @@
     commitPull();
   });
 
-  (async () => {
-    setProgress(lockedProgress);
-    showNow(CELS[0].idle);
-    setState('idle');
-    CELS.forEach((_, index) => preloadChapter(index));
-  })();
+  setProgress(storedProgress);
+  showNow(CELS[0].idle);
+  setState('idle');
+  CELS.forEach((_, index) => preloadChapter(index));
 })();
