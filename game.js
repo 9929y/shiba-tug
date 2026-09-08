@@ -12,10 +12,10 @@
   const FULL_DRAG = .22;
   const MIN_BAR = .035;
 
-  const NAMES = ['idle', 'hover', 'pull', 'brace', 'reactionA', 'reactionB', 'turn', 'refusal', 'return', 'slide', 'replant', 'settled'];
+  const NAMES = ['idle', 'hover', 'takeup', 'pull', 'tight-1', 'brace', 'tight-2', 'crouch-1', 'crouch-2', 'reactionA', 'reactionB', 'turn-1', 'turn', 'turn-2', 'refusal', 'return', 'slide-1', 'slide', 'replant', 'settled'];
   const pathFor = (chapter, name) => {
     const endX = [1060, 1015, 970][chapter];
-    const isLoose = ['idle', 'hover', 'settled', 'replant'].includes(name);
+    const isLoose = ['idle', 'hover', 'takeup', 'settled', 'replant'].includes(name);
     const startY = 242;
     const endY = name === 'refusal' ? 338 : 298;
     const sag = isLoose ? 105 : 22;
@@ -130,11 +130,18 @@
   }
 
   function frameForTension(tension, variant) {
-    if (tension < .12) return 'hover';
-    if (tension < .30) return 'pull';
-    if (tension < .50) return 'brace';
-    if (tension < .68) return variant;
-    if (tension < .84) return 'turn';
+    if (tension < .08) return 'hover';
+    if (tension < .18) return 'takeup';
+    if (tension < .28) return 'pull';
+    if (tension < .38) return 'tight-1';
+    if (tension < .48) return 'brace';
+    if (tension < .58) return 'tight-2';
+    if (tension < .66) return 'crouch-1';
+    if (tension < .74) return 'crouch-2';
+    if (tension < .80) return variant;
+    if (tension < .86) return 'turn-1';
+    if (tension < .92) return 'turn';
+    if (tension < .97) return 'turn-2';
     return 'refusal';
   }
 
@@ -191,16 +198,15 @@
   }
 
   function settleFrames(preview, variant, crossedMilestone) {
+    const tensionPath = ['hover', 'takeup', 'pull', 'tight-1', 'brace', 'tight-2', 'crouch-1', 'crouch-2', variant, 'turn-1', 'turn', 'turn-2', 'refusal'];
+    const currentIndex = Math.max(0, tensionPath.indexOf(preview));
     if (crossedMilestone) {
-      if (preview === 'refusal') return ['return', 'slide', 'replant'];
-      if (preview === 'turn') return ['refusal', 'return', 'slide', 'replant'];
-      return [variant, 'turn', 'refusal', 'return', 'slide', 'replant'];
+      return [...tensionPath.slice(currentIndex + 1), 'return', 'slide-1', 'slide', 'replant'];
     }
     if (preview === 'refusal') return ['return', 'settled'];
-    if (preview === 'turn') return ['refusal', 'return', 'settled'];
+    if (['turn-1', 'turn', 'turn-2'].includes(preview)) return [...tensionPath.slice(currentIndex + 1), 'return', 'settled'];
     if (preview === 'reactionA' || preview === 'reactionB') return ['settled'];
-    if (preview === 'brace') return [variant, 'settled'];
-    return ['brace', 'settled'];
+    return [tensionPath[Math.min(currentIndex + 1, tensionPath.length - 1)], 'settled'];
   }
 
   async function resetAfterComplete() {
