@@ -48,19 +48,31 @@ function render(){
   const anchor=ropeAnchors.get(img)||{y:320,slope:.4},anchorY=y+anchor.y;
   ctx.save();ctx.lineCap='round';ctx.beginPath();ctx.moveTo(start,anchorY);ctx.bezierCurveTo(start+70,anchorY+anchor.slope*70,info.cx-120,info.cy+(drag?.blocked?10:120),info.cx,info.cy);
   ctx.strokeStyle='#533e30';ctx.lineWidth=16;ctx.stroke();ctx.strokeStyle='#a44935';ctx.lineWidth=12;ctx.stroke();ctx.restore();
-  ctx.save();ctx.fillStyle='rgba(111,88,53,.08)';ctx.beginPath();ctx.ellipse(dogStart+310,y+443,130,7,0,0,Math.PI*2);ctx.fill();ctx.restore();drawSprite(spriteIndex,dogStart+310,y+442,365,source);ctx.save();ctx.strokeStyle='#604b38';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(info.cx,info.cy,6,4,-.4,0,Math.PI*2);ctx.stroke();ctx.restore();
+  ctx.save();ctx.fillStyle='rgba(111,88,53,.08)';ctx.beginPath();ctx.ellipse(dogStart+310,y+443,130,7,0,0,Math.PI*2);ctx.fill();ctx.restore();drawSprite(spriteIndex,dogStart+310,y+442,365,source);
  }else draw(900,636,dogStart,636);
  if(distance>.72&&art.house){ctx.save();ctx.globalAlpha=clamp((shown-.72)/.25)*.35;ctx.drawImage(art.house,20,Math.max(0,y-80),mobile?220:280,mobile?147:187);ctx.restore();}
  $('ropeHit').parentElement.setAttribute('viewBox',`0 0 ${cw} ${ch}`);
  $('ropeHit').style.strokeWidth=String(Math.max(90,44*cw/bounds.width));
+ // Keep the hand and baked front segment grabbable in every pose, including
+ // personality sprites whose generated rope begins only at source x=480.
+ const gripX=(mobile?135:315)-handShift;
+ $('gripHit').style.strokeWidth=String(Math.max(140,48*cw/bounds.width));
+ $('gripHit').setAttribute('d',`M ${gripX-40} ${y+235} Q ${gripX+55} ${y+250} ${start} ${y+(ropeAnchors.get(img)?.y||320)}`);
  $('ropeHit').setAttribute('d',ropePath||`M ${(mobile?135:315)-handShift} ${240+y} Q ${(start+dogStart)/2} ${y+540-t*280} ${dogStart+135} ${y+300}`);
  stage.dataset.expression=special===undefined?'neutral':String(special);stage.dataset.feeling=drag?.blocked?'blocked':(t>=.25&&t<=.7?'comfortable':'loose');stage.dataset.pose=pose;stage.dataset.tension=t.toFixed(4);updateProgress();
 }
 function measureSprites(img){
  const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(img,0,0);const data=g.getImageData(0,0,c.width,c.height).data,sw=c.width/4,sh=c.height/2,boxes=[];
- for(let n=0;n<8;n++){let x0=sw,y0=sh,x1=0,y1=0,cx=0,cy=0,count=0;const ox=n%4*sw,oy=Math.floor(n/4)*sh;
- for(let y=0;y<sh;y++)for(let x=0;x<sw;x++){const i=((oy+y)*c.width+ox+x)*4;if(data[i+3]<128)continue;x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);if(data[i]>80&&data[i+1]<95&&data[i+2]<95&&data[i]>data[i+1]*1.35){cx+=x;cy+=y;count++;}}
- boxes.push({sx:ox+x0,sy:oy+y0,sw:x1-x0+1,sh:y1-y0+1,cx:count?cx/count-x0:(x1-x0)*.3,cy:count?cy/count-y0:(y1-y0)*.55});}
+ for(let n=0;n<8;n++){let x0=sw,y0=sh,x1=0,y1=0;const ox=n%4*sw,oy=Math.floor(n/4)*sh,rows=new Uint32Array(sh),red=[];
+ for(let y=0;y<sh;y++)for(let x=0;x<sw;x++){const i=((oy+y)*c.width+ox+x)*4;if(data[i+3]<128)continue;x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);
+ // The collar is the widest saturated-red band; mouths and tan fur must not
+ // shift its anchor upward. No decorative ring is painted over the dog.
+ if(data[i]>90&&data[i+1]<105&&data[i+2]<100&&data[i]>data[i+1]*1.8&&data[i]>data[i+2]*1.6){rows[y]++;red.push([x,y]);}}
+ let peak=0;for(let y=1;y<sh;y++)if(rows[y]>rows[peak])peak=y;
+ const band=red.filter(([,y])=>Math.abs(y-peak)<=8),count=band.length;
+ const cx=count?band.reduce((sum,[x])=>sum+x,0)/count-x0:(x1-x0)*.3,cy=count?band.reduce((sum,[,y])=>sum+y,0)/count-y0:(y1-y0)*.55;
+ boxes.push({sx:ox+x0,sy:oy+y0,sw:x1-x0+1,sh:y1-y0+1,cx,cy});}
+
  spriteBounds.set(img,boxes);
 }
 function spritePlacement(img,index,x,baseline,height){const b=spriteBounds.get(img)[index],scale=height/b.sh,width=b.sw*scale;return {...b,dx:x-width*.5,dy:baseline-height,width,height,cx:x-width*.5+b.cx*scale,cy:baseline-height+b.cy*scale};}
@@ -87,31 +99,31 @@ function tick(now){
  if(action){const elapsed=now-action.start;let cursor=0;for(const item of action.frames){cursor+=item.ms;if(elapsed<cursor){pose=item.pose||'replant';action.sprite=item.sprite;action.walk=item.walk;break;}}
  if(elapsed>=cursor){restingSprite=action.rest??null;action=null;pose='idle';if(distance>=1&&!motion)home();else if(!drag)setMode('idle');}}
  if(!action&&!motion&&!drag&&distance>=1&&mode!=='home'&&mode!=='complete')home();
- if(mode==='home'&&now-endingAt>=(reduced.matches?500:5200)){setMode('complete');stage.setAttribute('aria-label','已经到家，柴犬回头摇尾巴。');say('到家了。柴犬回头向你摇尾巴。');}
+ if(mode==='home'&&now-endingAt>=(reduced.matches?500:5200)){setMode('complete');stage.setAttribute('aria-label','Home at last. Your Shiba looks back and wags its tail.');say('Home at last. Your Shiba looks back and wags its tail.');}
  render();if(drag||motion||action||mode==='home')wake();else last=0;
 }
-function home(){endingAt=performance.now();setMode('home');$('route').hidden=true;stage.setAttribute('aria-label','柴犬正在跟你一起回家');say('它主动跟上你，一起回家。');wake();}
+function home(){endingAt=performance.now();setMode('home');$('route').hidden=true;stage.setAttribute('aria-label','Your Shiba is walking home with you');say('Your Shiba follows you home.');wake();}
 function newDrag(id,x){token++;action=null;restingSprite=null;drag={pointerId:id,startX:x,tension:0,peak:0,blocked:false,recoverAt:null,sampleTime:performance.now(),valid:false};setMode('dragging');stage.classList.add('is-dragging');$('guide').hidden=true;try{sessionStorage.setItem('shiba-guided','1')}catch{};render();wake();}
-function start(e){if(!['idle','settling'].includes(mode)||drag||e.button!==0||e.isPrimary===false||e.target.id!=='ropeHit')return;e.preventDefault();bounds=stage.getBoundingClientRect();newDrag(e.pointerId,e.clientX);try{stage.setPointerCapture(e.pointerId)}catch{};}
+function start(e){if(!['idle','settling'].includes(mode)||drag||e.button!==0||e.isPrimary===false||!['ropeHit','gripHit'].includes(e.target.id))return;e.preventDefault();bounds=stage.getBoundingClientRect();newDrag(e.pointerId,e.clientX);try{stage.setPointerCapture(e.pointerId)}catch{};}
 function move(e){if(!drag||drag.keyboard||e.pointerId!==drag.pointerId)return;samplePull(drag,(drag.startX-e.clientX)/pullLength(bounds.width),performance.now());pose=poseFor(drag.tension);render();}
 function clean(){const id=drag?.pointerId;drag=null;stage.classList.remove('is-dragging');if(id!==undefined&&id!=='keyboard'&&stage.hasPointerCapture(id))stage.releasePointerCapture(id);}
 function end(e){if(!drag||e.pointerId!==drag.pointerId)return;samplePull(drag,(drag.startX-e.clientX)/pullLength(bounds.width),performance.now());finish();}
 function finish(){const result=previewPull(drag);clean();commit(result);}
 function cancel(e){if(!drag||(e?.pointerId!==undefined&&e.pointerId!==drag.pointerId))return;clean();pose='idle';setMode('idle');render();}
 function commit(result){
- if(!result.gain){if(result.kind==='refusal'){reaction++;action={start:performance.now(),rest:reaction%2,frames:[{pose:'turn',ms:100},{pose:'refusal',sprite:reaction%2,ms:650},{pose:'return',ms:120}],sprite:undefined};setMode('settling');say(breed==='black'?'它得意地笑了。放松一点，再试试。':'它委屈地撑住了。轻一点试试。');wake()}else{setMode('idle');pose='idle';render()}return;}
+ if(!result.gain){if(result.kind==='refusal'){reaction++;action={start:performance.now(),rest:reaction%2,frames:[{pose:'turn',ms:100},{pose:'refusal',sprite:reaction%2,ms:650},{pose:'return',ms:120}],sprite:undefined};setMode('settling');say(breed==='black'?'That smug little grin! Ease up and try again.':'Your Shiba digs in. Try a gentler pull.');wake()}else{setMode('idle');pose='idle';render()}return;}
  distance=clamp(distance+result.gain);stepCount++;motion={from:shown,start:performance.now(),duration:reduced.matches?60:640};
  action={start:performance.now(),rest:result.kind==='trust'?3:2+(stepCount%2),frames:reduced.matches?[{pose:'replant',ms:60}]:[{pose:'lift',walk:0,ms:130},{pose:'slide-1',walk:1,ms:130},{pose:'slide',walk:2,ms:130},{pose:'land',walk:3,ms:130},{pose:'replant',sprite:result.kind==='trust'?3:2+(stepCount%2),ms:280}]};
- setMode('settling');say(result.kind==='trust'?'放松绳子，它开心地跟上了。':'它跟上了一步。');wake();
+ setMode('settling');say(result.kind==='trust'?'You relaxed the leash. Your Shiba happily follows.':'Your Shiba takes a step.');wake();
 }
 async function switchBreed(next){
  if(next===breed||mode==='home'||mode==='loading')return;cancel();const request=++skinToken;$('breedStatus').textContent='…';
  const all=await Promise.all(Object.values(paths(next)).map(src=>load(src)));
- if(request!==skinToken)return;if(all.some(x=>!x)){$('breedStatus').textContent='加载失败，请重试';return;}
+ if(request!==skinToken)return;if(all.some(x=>!x)){$('breedStatus').textContent='Could not load your Shiba. Try again.';return;}
  breed=next;action=null;restingSprite=null;pose='idle';if(mode!=='complete')setMode('idle');uiBreed();$('breedStatus').textContent='';try{localStorage.setItem('shiba-breed',breed)}catch{}render();
 }
-function restart(){token++;clean();distance=shown=0;motion=action=null;restingSprite=null;pose='idle';stepCount=reaction=0;$('route').hidden=false;stage.setAttribute('aria-label','牵引绳，按住左方向键拉动，右方向键放松，松开结算');setMode('idle');render();}
-async function boot(){setMode('loading');const items=await Promise.all(['yellow','black','home','house','walk'].map(async name=>[name,await load('assets/personality/'+name+'.webp',name==='house')]));art=Object.fromEntries(items);for(const [name,img] of items)if(img&&name!=='house')measureSprites(img);if(items.some(([,img])=>!img)){$('loading').textContent='点击重试';return;}const names=Object.values(paths(breed));let cursor=0,failed=false;const worker=async()=>{while(cursor<names.length)if(!await load(names[cursor++]))failed=true;};await Promise.all([worker(),worker(),worker()]);if(failed){$('loading').textContent='点击重试';return}setMode('idle');uiBreed();render();try{$('guide').hidden=!!sessionStorage.getItem('shiba-guided')}catch{};setTimeout(()=>$('guide').hidden=true,4500);}
+function restart(){say('Ready for another walk.');token++;clean();distance=shown=0;motion=action=null;restingSprite=null;pose='idle';stepCount=reaction=0;$('route').hidden=false;stage.setAttribute('aria-label','Leash: hold Left Arrow to pull, Right Arrow to relax, release to take a step');setMode('idle');render();}
+async function boot(){setMode('loading');const items=await Promise.all(['yellow','black','home','house','walk'].map(async name=>[name,await load('assets/personality/'+name+'.webp',name==='house')]));art=Object.fromEntries(items);for(const [name,img] of items)if(img&&name!=='house')measureSprites(img);if(items.some(([,img])=>!img)){$('loading').textContent='Tap to retry';return;}const names=Object.values(paths(breed));let cursor=0,failed=false;const worker=async()=>{while(cursor<names.length)if(!await load(names[cursor++]))failed=true;};await Promise.all([worker(),worker(),worker()]);if(failed){$('loading').textContent='Tap to retry';return}setMode('idle');uiBreed();render();try{$('guide').hidden=!!sessionStorage.getItem('shiba-guided')}catch{};setTimeout(()=>$('guide').hidden=true,4500);}
 stage.addEventListener('pointerdown',start);stage.addEventListener('pointermove',move);stage.addEventListener('pointerup',end);stage.addEventListener('pointercancel',cancel);stage.addEventListener('lostpointercapture',cancel);
 stage.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key)||!['idle','settling','dragging'].includes(mode))return;e.preventDefault();if(!drag)newDrag('keyboard',0);if(drag.pointerId!=='keyboard')return;drag.keyboard=true;drag.keys??=new Set();drag.keys.add(e.key);drag.direction=e.key==='ArrowLeft'?1:-1;});
 stage.addEventListener('keyup',e=>{if(drag?.keyboard&&['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();drag.keys.delete(e.key);if(!drag.keys.size)finish();else drag.direction=drag.keys.has('ArrowRight')?-1:1;}});

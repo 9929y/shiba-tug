@@ -22,3 +22,11 @@ Eight distinct personality poses, eight side-walk poses and eight rear-walk/look
 No physical phone was tested. Generated keyframes have some natural pencil/anatomy variation, so this is not continuous skeletal animation. Rendering interpolates hand/rope position and walk translation; character pose changes use reviewed cels. Builds are static, local only; no push or deployment was performed.
 
 Final browser passes: yellow ending at 390px and black ending at 1280px both completed all checks. Yellow run: handler median/P95 0.40/0.60ms, next rAF 16.50/17.60ms. Desktop black run: handler 0.50/0.90ms, next rAF 16.60/18.20ms. Final camera was checked visually: full dog visible inside the doorway; no rectangular stage background. The browser tool also logged two unlocalized MutationObserver errors; this app and its current harness do not instantiate MutationObserver, and no behavioral check failed.
+
+## Follow-up: repeat grip input, English UI and collar artifact
+
+Reproduced a real hit-test failure at 7.91%: dragging the visible hand at (270,510) did not start another pull. Personality rendering switched the rope hit path to a cubic starting at source x=480, omitting the visible hand and front leash. Added a separate persistent grip hit path in both layouts, accepted by the same pointer state machine. Blank-stage presses still do nothing.
+
+All production UI strings, accessibility descriptions, status/error messages and document language are now English; versioned entrypoint resources avoid stale mixed-language scripts. Removed the decorative collar ellipse that was being drawn on the chin, and derive the leash anchor from the widest saturated red band instead of averaging all red pixels (including mouth pixels).
+
+Verification: 14 Node tests pass, including black grip input through completion and a production-language check. Actual CUA mouse drags from (270,510) to (125,510), nine consecutive pulls, reached 100% and the completed homecoming screen. Actual restart and overpull work; visual inspection confirms no chin circle. This addresses the gap in prior synthetic tests, which dispatched directly to the rope element and bypassed browser hit testing.

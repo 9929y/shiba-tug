@@ -32,3 +32,10 @@ test('breed switches retain progress and failure retains prior skin',async()=>{f
 test('finish plays home animation, persists, and restart resets',async()=>{const g=await game();for(let i=0;i<12;i++){g.send('pointerdown');g.send('pointerup',446);await g.tick(820)}await g.tick(6000);assert.equal(g.get('stage').dataset.state,'complete');assert.equal(g.get('restart').hidden,false);g.get('restart').events.click();assert.equal(+g.get('stage').dataset.progress,0);assert.equal(g.get('stage').dataset.state,'idle')});
 test('keyboard held arrows change tension and release commits',async()=>{const g=await game();const e={key:'ArrowLeft',preventDefault(){}};g.get('stage').events.keydown(e);await g.tick(700);assert.ok(+g.get('stage').dataset.preview>0);g.get('stage').events.keyup(e);await g.tick(900);assert.ok(+g.get('stage').dataset.progress>0)});
 test('reduced motion completes through short ending',async()=>{const g=await game({reduced:true});for(let i=0;i<12;i++){g.send('pointerdown');g.send('pointerup',446);await g.tick(100)}await g.tick(1000);assert.equal(g.get('stage').dataset.state,'complete')});
+test('grip remains usable after black personality reactions through a full game',async()=>{
+ const g=await game();g.get('black').events.click();await g.tick(100);
+ const grip=()=>g.get('stage').events.pointerdown({clientX:600,clientY:250,pointerId:1,button:0,isPrimary:true,preventDefault(){},target:{id:'gripHit'}});
+ for(let i=0;i<10;i++){grip();g.send('pointerup',455);await g.tick(900);assert.ok(+g.get('stage').dataset.progress>i*.1);}
+ await g.tick(6000);assert.equal(g.get('stage').dataset.state,'complete');
+});
+test('all shipped game strings are English',()=>{for(const f of ['index.html','game.js','mechanics.js'])assert.doesNotMatch(fs.readFileSync(f,'utf8'),/[\u3400-\u9fff]/);assert.match(fs.readFileSync('index.html','utf8'),/lang="en"/)});
