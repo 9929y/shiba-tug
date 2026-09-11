@@ -1,41 +1,7 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>小柴的散步谈判</title>
-    <meta name="description" content="一只很难被说服去散步的柴犬。" />
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body>
-    <main class="toy-shell">
-      <section class="toy" aria-label="小柴拉绳小游戏">
-        <div class="stage" id="stage" data-state="idle" data-chapter="1">
-          <div class="cel-viewport" id="celViewport">
-            <img class="cel cel-previous" id="celPrevious" alt="" aria-hidden="true" />
-            <img class="cel cel-current" id="celCurrent" alt="一只柴犬固执地站在牵引绳另一端。" />
-            <svg class="hit-layer" viewBox="0 0 1536 512" preserveAspectRatio="none" aria-hidden="true">
-              <path id="ropeHit" class="rope-hit" d="M 305 265 C 560 370, 795 373, 1050 297" />
-            </svg>
-            <div class="grab-cue" id="grabCue" aria-hidden="true">
-              <i class="grab-ripple ripple-one"></i><i class="grab-ripple ripple-two"></i>
-              <svg viewBox="0 0 52 52" focusable="false">
-                <path class="cue-motion" d="M8 19c-3 4-3 10 0 14M14 14c-5 6-5 17 0 24" />
-                <path class="cue-hand" d="M25 43c-7 0-12-5-12-12v-7c0-2 2-3 4-1l4 4V13c0-3 5-3 5 0v12-15c0-3 5-3 5 0v15-12c0-3 5-3 5 0v14-9c0-3 5-3 5 0v14c0 7-5 11-12 11Z" />
-                <path class="cue-line" d="M21 27h20" />
-              </svg>
-            </div>
-          </div>
-          <button class="leash-control" id="leashControl" type="button" aria-describedby="tugHint">
-            <span class="sr-only">轻拉牵引绳</span>
-          </button>
-          <p id="tugHint" class="sr-only">可点击或拖动画中的牵引绳，也可按空格或回车推进。</p>
-        </div>
-        <div class="fluid-progress" id="fluidProgress" aria-hidden="true">
-          <div class="fluid-track"><div class="fluid-fill"></div></div>
-        </div>
-      </section>
-    </main>
-    <script src="game.js"></script>
-  </body>
-</html>
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shiba Tug</title><link rel="stylesheet" href="styles.css?v=5"></head><body>
+<main class="toy-shell"><section class="toy" aria-label="Shiba Tug">
+<header class="game-header" id="breedHeader"><div></div><div class="breed-picker" role="group" aria-label="Choose your Shiba"><button class="breed selected" data-breed="yellow" aria-label="Golden Shiba" aria-pressed="true"><span class="breed-portrait yellow"></span></button><button class="breed" data-breed="black" aria-label="Black Shiba" aria-pressed="false"><span class="breed-portrait black"></span></button><span id="breedStatus" class="breed-status" role="status"></span></div></header>
+<div class="stage" id="stage" data-state="loading" tabindex="0" role="group" aria-label="Leash: hold Left Arrow to pull, Right Arrow to relax, release to take a step" aria-describedby="instructions"><canvas id="scene" width="1536" height="512" role="img" aria-label="A Shiba Inu on a red leash"></canvas><svg class="hit-layer" viewBox="0 0 1536 512" preserveAspectRatio="none" aria-hidden="true"><path id="gripHit" class="rope-hit" d="M 250 240 L 480 330"/><path id="ropeHit" class="rope-hit" d="M315 240 Q700 430 1035 300"/></svg><div class="drag-guide" id="guide" aria-hidden="true">←</div><button id="loading" class="loading" type="button">Getting ready…</button></div>
+<div id="route" class="route" aria-hidden="true"><svg class="route-paw" viewBox="0 0 24 24"><path d="M7 16c0-3 3-6 5-6s5 3 5 6-3 2-5 2-5 1-5-2Z"/><ellipse cx="5" cy="9" rx="2" ry="3"/><ellipse cx="10" cy="5" rx="2" ry="3"/><ellipse cx="16" cy="5" rx="2" ry="3"/><ellipse cx="20" cy="10" rx="2" ry="3"/></svg><span id="routeValue" class="route-value">0%</span><span id="pullHint" class="pull-hint">Drag left, then release</span><span class="route-preview"></span><span class="route-line"></span></div><progress class="sr-only" id="walkProgress" max="100" value="0" aria-label="Progress home"></progress>
+<p id="instructions" class="sr-only">Hold the hand or red leash and drag left. Release to take a step. A gentle pull goes further; pulling too far makes your Shiba resist. You can also use the arrow keys.</p><p id="message" class="sr-only" role="status" aria-live="polite"></p><button id="restart" class="restart" aria-label="Play again" hidden>↻</button>
+</section></main><script src="mechanics.js?v=5"></script><script src="frames.js"></script><script src="black-frames.js"></script><script src="game.js?v=5"></script></body></html>

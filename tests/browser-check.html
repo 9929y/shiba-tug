@@ -1,0 +1,24 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>拉绳遛柴验证</title><style>body{font:14px system-ui;background:#fcf6ea}button{padding:12px}main{display:flex;gap:20px}iframe{width:390px;height:740px;border:1px solid #ccc;flex-shrink:0}pre{white-space:pre-wrap}</style><button id="run">运行检查（黑柴结尾）</button><button id="yellowEnd">运行检查（黄柴结尾）</button><button id="mobile">390px</button><button id="desktop">1280px</button><main><iframe id="game" src="../index.html" title="游戏验证"></iframe><pre id="output">等待运行</pre></main><script>
+const f=document.querySelector('#game'),out=document.querySelector('#output'),sleep=ms=>new Promise(r=>setTimeout(r,ms));
+document.querySelector('#mobile').onclick=()=>f.style.width='390px';document.querySelector('#desktop').onclick=()=>f.style.width='1280px';
+async function until(fn,limit=12000){let at=performance.now();while(!fn()){if(performance.now()-at>limit)throw Error('等待超时');await sleep(25)}}
+document.querySelector('#yellowEnd').onclick=()=>{document.querySelector('#run').dataset.ending='yellow';document.querySelector('#run').click()};
+document.querySelector('#run').onclick=async()=>{out.textContent='';const log=s=>out.textContent+=s+'\n',ok=(v,s)=>{if(!v)throw Error(s);log('PASS '+s)};const w=f.contentWindow,d=f.contentDocument,$=id=>d.getElementById(id),stage=$('stage');
+const send=(type,t=0,target=$('ropeHit'))=>{const b=stage.getBoundingClientRect();target.dispatchEvent(new w.PointerEvent(type,{bubbles:true,cancelable:true,clientX:b.left+b.width*.7-t*w.ShibaRules.pullLength(b.width),clientY:b.top+b.height*.6,pointerId:7,pointerType:'touch',button:0,isPrimary:true}))};
+const pull=async(t)=>{send('pointerdown');send('pointermove',t);const predicted=+stage.dataset.preview;send('pointerup',t);await sleep(850);return predicted;};
+try{
+ await until(()=>stage.dataset.state==='idle'||stage.dataset.state==='complete');if(stage.dataset.state==='complete')$('restart').click();
+ send('pointerdown',0,stage);ok(stage.dataset.state==='idle','空白处不能拉绳');
+ send('pointerdown');send('pointermove',.5);const preview=+stage.dataset.preview;ok(preview>0&&+stage.dataset.progress===0,'拖动立即预览，不提前结算');send('pointerup',.5);await sleep(900);ok(Math.abs(+stage.dataset.progress-preview)<.001,'松手收益与预览一致');
+ const saved=+stage.dataset.progress;send('pointerdown');send('pointermove',1);ok(+stage.dataset.preview===.08,'过拉仍有小步收益');send('pointermove',.5);await sleep(200);ok(+stage.dataset.preview>0,'回松保持后恢复');send('pointercancel');ok(+stage.dataset.progress===saved&&+stage.dataset.preview===0,'取消撤销预览');
+ await pull(.6);send('pointerdown');send('pointermove',.4);ok(stage.dataset.state==='dragging','连续拖拽可开始');send('pointercancel');
+ const samples=[],rafSamples=[];send('pointerdown');for(let i=0;i<30;i++){const at=performance.now();send('pointermove',.3+i%5*.04);samples.push(performance.now()-at);await new Promise(r=>w.requestAnimationFrame(r));rafSamples.push(performance.now()-at)}send('pointercancel');samples.sort((a,b)=>a-b);rafSamples.sort((a,b)=>a-b);log('METRIC dispatch→feedback median/P95 '+samples[15].toFixed(2)+'/'+samples[28].toFixed(2)+' ms');log('METRIC next rAF median/P95 '+rafSamples[15].toFixed(2)+'/'+rafSamples[28].toFixed(2)+' ms');
+ const before=stage.dataset.progress;d.querySelector('[data-breed="black"]').click();await until(()=>stage.dataset.breed==='black');ok(stage.dataset.progress===before,'换黑柴保留进度');
+ send('pointerdown');send('pointermove',1);send('pointerup',1);await sleep(250);ok(stage.dataset.state==='settling','黑柴得意反应');await sleep(800);
+ if(document.querySelector('#run').dataset.ending==='yellow'){d.querySelector('[data-breed=yellow]').click();await until(()=>stage.dataset.breed==='yellow')}
+ for(let i=0;i<16&&+stage.dataset.progress<1;i++)await pull(.67);
+ await until(()=>stage.dataset.state==='complete');ok(+stage.dataset.endingProgress===1,'走进家门、回头结尾完成');ok(!$('restart').hidden,'重玩可用');
+ ok(d.documentElement.scrollWidth<=d.documentElement.clientWidth,'布局无横向溢出');
+ delete document.querySelector('#run').dataset.ending;log('DONE：合成触摸检查完成；实体鼠标与最终画面单独检查。');
+}catch(e){log('FAIL '+e.message)}
+};</script></html>

@@ -1,0 +1,6 @@
+<!doctype html><meta charset="utf-8"><title>原版基线验证</title><style>body{font:14px system-ui;background:#faf6ec}iframe{width:390px;height:620px;border:1px solid #ddd}pre{white-space:pre-wrap}</style><h1>原版 0c1511e · 390px 基线</h1><pre id="report">读取原版…</pre><iframe id="legacy" src="legacy-baseline.html" title="原版手机尺寸"></iframe>
+<script>
+const f=document.querySelector('iframe');f.onload=async()=>{const w=f.contentWindow,d=f.contentDocument,s=d.querySelector('#stage'),b=d.querySelector('#leashControl'),p=d.querySelector('#fluidProgress'),out=document.querySelector('#report');const sleep=ms=>new Promise(r=>setTimeout(r,ms));const done=async()=>{const t=performance.now();while(b.disabled&&performance.now()-t<6000)await sleep(16)};await sleep(600);out.textContent='实际舞台尺寸 '+s.clientWidth+' × '+s.clientHeight+'px\n';
+const start=performance.now();b.click();const first=p.getAttribute('style');b.click();const second=p.getAttribute('style');out.textContent+='连续两次点击：第一次 '+first+'；第二次 '+second+'；state='+s.dataset.state+'；disabled='+b.disabled+'\n';await done();out.textContent+='本次松手锁定约 '+Math.round(performance.now()-start)+'ms\n';
+for(let i=0;i<3;i++){b.click();await done();}out.textContent+='继续推进后 chapter='+s.dataset.chapter+'，frame='+d.querySelector('#celCurrent').getAttribute('src')+'\n';out.textContent+='DONE · 原版能阶段性挪步，连续输入被锁定，手机舞台偏小。';};
+</script>

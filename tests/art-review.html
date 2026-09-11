@@ -1,0 +1,15 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>柴犬逐帧对照</title>
+<style>body{font:15px system-ui;background:#f7f1e7;color:#49382c;margin:24px}img{display:block;width:min(100%,1100px);aspect-ratio:3/1}button,input{margin:8px;padding:10px}iframe{border:1px solid #ccc;width:390px;height:844px}</style>
+<h1>原版 / 补帧样段</h1><p>同样的拖拽距离、相同的总时长。检查脚是否完整、身体大小是否稳定、轮廓是否双影。</p>
+<button id="play">播放 / 暂停</button><label>张力 <input id="scrub" type="range" min="0" max="100" value="0"></label>
+<p id="label"></p><img id="old" alt="原版帧"><img id="fresh" alt="新增中间帧">
+<h2>390px 手机布局</h2><iframe src="../index.html" title="手机尺寸游戏"></iframe>
+<script>
+const oldNames=['idle','hover','takeup','pull','tight-1','brace'];
+const newNames=['frames/ch1-idle','frames/ch1-hover','inbetweens/ch1-takeup','frames/ch1-pull','inbetweens/ch1-tight-1','frames/ch1-brace'];
+const scrub=document.querySelector('#scrub');let playing=false,start=0;
+function paint(value){const i=Math.min(5,Math.floor(value/100*6));document.querySelector('#old').src='../assets/cels/frames/ch1-'+oldNames[i]+'.webp';document.querySelector('#fresh').src='../assets/cels/'+newNames[i]+'.webp';document.querySelector('#label').textContent='帧位 '+i+' · '+oldNames[i];}
+scrub.oninput=()=>{playing=false;paint(+scrub.value)};
+document.querySelector('#play').onclick=()=>{playing=!playing;start=performance.now();if(playing)requestAnimationFrame(step)};
+function step(t){if(!playing)return;const v=((t-start)%2400)/2400*100;scrub.value=v;paint(v);requestAnimationFrame(step)}paint(0);
+</script></html>
